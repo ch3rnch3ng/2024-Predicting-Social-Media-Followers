@@ -1,0 +1,3326 @@
+---
+title: "Topic 2: Predicting the number of Twitter followers"
+subtitle: "ACCT653 Forecasting and Forensic Analytics"
+author:   
+  - CHERN Cheng (01354502)
+  - SUN Yifan (01461236)
+  - TEAN Wan Ching (01462626)
+  - YUE Zixuan (01475299)
+  - ZHANG Erhe (01475073)
+description: "Instructor’s name: Wang Jiwei"
+abstract: "Predicting the number of social media followers for US corporations"
+date: "`r Sys.Date()`"
+format:
+  html:
+    self-contained: true
+    grid:
+      margin-width: 350px
+execute: 
+  echo: true
+reference-location: margin
+citation-location: margin
+---
+
+## 1. Introduction
+
+(This file requires around 10 minutes to run through.)
+Social media prediction (SMP) encompasses a paramount framework when conducting the prediction process, including considerations such as the source of data, algorithm used and evaluation of prediction. This topic has emerged as a powerful tool, attracting the attention of researchers and practitioners alike. Among the abundant studies, multiple predictors and features have been utilized to improve prediction. However, most studies still focus on the social behaviours and activities on social media itself. Based on this, we aim to broaden the possibilities by embedding more potential predictors to enhance results as well as better understand the function of machine learning tools.
+
+During this project, using R programming as our coding language, we analyze and attempt to predict the daily number of twitter followers for US-listed firms during 2017. We first briefly review the literature, followed by an overview of our data sources in the data preparation section, then the explanatory description of data, sample and variables descriptive statistics. After that, we run several types of models and machine learning algorithms and evaluate the prediction results. Finally, we summarize the performance of all our models and share the key take aways from this project.
+
+## 2. Literature Review
+
+The exposure of social media account has been a subject of extensive inquiry, with operating multiple and advanced social platforms becoming the mainstream of advertising and marketing. While substantial evidence exists trying to unfold the key factors behind the influence of the social media accounts, empirical results vary and do not come to the consensus about how to better predict and utilize the influence, among which number of followers is one of the main indicators. To elucidate the achievements of previous research and the contribution of this report, we review primarily two strands of literature closely aligned with our study. The first strand of studies is focused on how financial information or statistics can be related to the popularity of twitter or influence of their social media accounts. While most studies have shed some light on how the sentiment of tweets or post contents can affect the financial and stock market, literature studying the effect of financial information on the popularity of social media accounts remain inadequate. Sayed (n.d.) utilizes accounting ratios to analyze the twitter sentiment and volume. The results shows that certain accounting ratios are not associated with the formation of twitter users, however, they do have positive impact on the twitter volume. Intuitively, twitter volume could have a strong effect on the number of twitter followers. This study provides evidence supporting our choice of financial indicators as features in our prediction model, especially considering corporation accounts as predicting object.
+
+Naturally, number of followers and the popularity of social media accounts could be directly influenced by the content of posts, the style of the account and some exogenous event, which could bring more visibility of certain accounts. Therefore, we mainly refer to studies in this area when selecting our non-financial features. Hutto et al. (2013) finds that variables for message content, social behaviour, and network structure should be equally considered when predicting followers. Similarly, the popularity on twitter can be mainly driven by tweets, profile page.(Mueller & Stumme, 2017) Considering their variables selection and data availability, we create profile related variables to show the characteristics of corporation account features. Besides, Tsileponis et al. (2020) examine the influence of voluntary corporate press releases on financial media coverage, which gives us insight into the function of corporations’ announcements. Therefore, we also consider announcements as important predictors in our models.
+
+In summary, predicting social media followers is a multifaceted topic that has drawn great attention in the academic field. While various studies have contributed valuable insights, the field remains dynamic and is worthy of further exploration, especially considering the function of financial indicators has not been sufficiently discussed. This report contributes to the studies of this field and aims to enhance the understanding of the interplay between corporation’s economic activities, social behaviours and social media popularity.
+
+## 3. Data Extraction and Data Cleaning
+
+### 3.1 : Data used
+
+These are the dataset used in our group project:
+
+1.  Followers_train.csv
+
+    \- the training dataset provided on Kaggle (<https://www.kaggle.com/competitions/followers/data>)
+
+2.  Followers_test.csv
+
+    \- the test dataset provided on Kaggle (<https://www.kaggle.com/competitions/followers/data>)
+
+3.  Followers_sampleSubmission.csv
+
+    \- a sample submission file in the correct format on Kaggle (<https://www.kaggle.com/competitions/followers/data>)
+
+4.  profile_info.csv
+
+    \- the twitter's users profile dataset is scrape from Twitter ([https://twitter.com](https://twitter.com/home?lang=en)), the process of scraping data is presented in Part 1.2
+
+5.  stock_price.csv
+
+    From S&P Global Market Intelligence \> S&P Compustat Global
+
+6.  key_developments.csv
+
+    From S&P Capital IQ \> Companies \> Key Developments
+
+7.  Financials.csv
+
+    From Compustat - Capital IQ \> North America \> Fundamentals Quarterly
+
+8.  Financial Ratios.csv
+
+    From Compustat - Capital IQ \> North America \> Financial Ratios Suite by WRDS
+
+### 3.2 : Packages used
+
+```{r}
+#| output: false
+library(readr)
+library(R.utils)
+library(readxl)
+pacman::p_load(rvest)
+pacman::p_load(tidyverse)
+pacman::p_load(ggplot2)
+pacman::p_load(randomForest)
+pacman::p_load(glmnet)
+pacman::p_load(coefplot)
+pacman::p_load(xgboost)
+pacman::p_load(ParBayesianOptimization)
+pacman::p_load(SmartEDA)
+pacman::p_load(quanteda.textstats)
+```
+
+### 3.3 : Scrape Twitter profile data
+
+Section 3.3 aims to scrape the profile information of companies' twitter accounts using RSelenium. The Selenium packages requires specific configuration (kindly refer to this: https://www.youtube.com/watch?v=GnpJujF9dBw) in order for the codes to run. This process takes a long time with some manual work needed. Hence, we recommend to skip these parts and use the scraped `profile_info.csv` (in Section 3.7) directly. You may proceed straight to Section 3.4 onwards to continue with processing and data cleaning codes.
+
+Due to the issue of mismatch and presence of advertisements on twitter, we cannot locate a company's twitter account simply by searching their company name. In this case, we will need to search and match the unique Twitter account name of each company, stored in `company information.xlsx` and resume scraping with the matched Twitter account names.
+
+```{r, eval=FALSE}
+# remove all the variables
+rm(list=ls()) 
+
+# load the required packages
+library(RSelenium)
+library(wdman)
+library(netstat)
+
+
+my_user <- "89423301"
+my_pass <- "y150500z113104X!"
+
+# open remote driver with firefox
+remote_driver <- rsDriver(browser = "firefox",
+                          chromever = NULL,
+                          verbose = F,
+                          port = free_port())
+
+
+remDr <- remote_driver$client
+remDr$open()
+remDr$navigate("https://twitter.com/i/flow/login")
+
+# enter user_id
+webElement <- remDr$findElement(using = "xpath", value = "//input[@type = 'text']")
+webElement$sendKeysToElement(list(my_user))
+webElement$sendKeysToElement(list(key = "enter"))
+Sys.sleep(3)
+
+# enter password
+webElement <- remDr$findElement(using = "xpath", value = "//input[@type = 'password']")
+webElement$sendKeysToElement(list(my_pass))
+webElement$sendKeysToElement(list(key = "enter"))
+
+# explanation of matching the company with username --------------------------------------------------
+### we try to automate the process of matching company name with its username using selenium. 
+### however, searching the company name can be matched to multiple accounts or zero accounts
+### which also requires our manual judgement
+### So we manully search and match the company name and the username of their account and store in company information
+# collect the profile information ------------------------------------------------
+accounts <- read_excel("company information.xlsx")
+accounts <- accounts %>% select(conm, username)
+accounts <- filter(accounts, !is.na(username))
+accounts$username <- substring(accounts$username, 2)
+
+com_info <- data.frame(matrix(vector(),0,7,
+                              dimnames = list(c(), 
+                                              c("profile_name", 
+                                                "profile_bio", 
+                                                "profile_category", 
+                                                "profile_website", 
+                                                "profile_joining_date", 
+                                                "profile_following", 
+                                                "profile_followers"))),
+                       stringsAsFactors=F)
+
+# for each account scrape the basic information
+for (j in 84:nrow(accounts)){
+  
+  search_item = accounts$username[j]
+  
+  search_box = remDr$findElement(using = "xpath", value = "//input[@data-testid='SearchBox_Search_Input']")
+  search_box$sendKeysToElement(list(search_item))
+  search_box$sendKeysToElement(list(key = "enter"))
+  Sys.sleep(5)
+  
+  # turn to the people page
+  remDr$findElement(using = "link text", value = "People")$clickElement()
+  Sys.sleep(5)
+  
+  # click the account
+  # now all click the first account by default
+  remDr$findElement(using = "xpath", value = paste0("//a[@href='/", search_item, "']"))$clickElement()
+  
+  # scrape the account information
+  l = list()
+  o = {}
+  
+  resp <- remDr$getPageSource()
+  html_info <- read_html(resp[[1]])
+  
+  # profile name
+  tryCatch({
+    profile_name <- html_info %>% html_node(".r-1vr29t4") %>% html_text()
+    o[["profile_name"]] <- profile_name
+  }, error = function(e) {
+    o[["profile_name"]] <- NA
+  })
+  
+  
+  # profile bio
+  tryCatch({
+    profile_bio <- html_info %>% html_node("[data-testid='UserDescription']") %>% html_text()
+    o[["profile_bio"]] <- profile_bio
+  }, error = function(e) {
+    o[["profile_bio"]] <- NA
+  })
+  
+  # information under the profile header
+  profile_header <- html_info %>% html_node("[data-testid='UserProfileHeader_Items']")
+  
+  # profile category
+  tryCatch({
+    profile_category <- profile_header %>% html_node("[data-testid='UserProfessionalCategory']") %>% html_text()
+    o[["profile_category"]] <- profile_category
+  }, error = function(e) {
+    o[["profile_category"]] <- NA
+  })
+  
+  # website
+  tryCatch({
+    profile_website <- profile_header %>% html_node("a") %>% html_attr("href")
+    o[["profile_website"]] <- profile_website
+  }, error = function(e) {
+    o[["profile_website"]] <- NA
+  })
+  
+  # join_date
+  tryCatch({
+    profile_joining_date <- profile_header %>% html_node("span[data-testid='UserJoinDate']") %>% html_text()
+    o[["profile_joining_date"]] <- profile_joining_date
+  }, error = function(e) {
+    o[["profile_joining_date"]] <- NA
+  })
+  
+  # number of following
+  tryCatch({
+    profile_following <- remDr$findElement(using = "xpath", "//span[contains(text(), 'Following')]/ancestor::a/span")
+    following <- profile_following$getElementText()
+    o[["profile_following"]] <- following[[1]]
+  }, error = function(e) {
+    o[["profile_following"]] <- NA
+  })
+  
+  # number of followers
+  tryCatch({
+    profile_followers <- remDr$findElement(using = "xpath", "//span[contains(text(), 'Followers')]/ancestor::a/span")
+    followers <- profile_followers$getElementText()
+    o[["profile_followers"]] <- followers[[1]]
+  }, error = function(e) {
+    o[["profile_followers"]] <- NA
+  })
+  
+  
+  # add search name
+  o[["user_name"]] <- paste0("@", search_item)
+  
+  l <- append(l, o)
+  cat(paste0("--------profile collection finish for ", accounts$conm[j], "-------- \n"))
+  com_info <- rbind(com_info, l)
+  
+  
+  remDr$goBack()
+  remDr$goBack()
+  
+}
+
+# if twitter run into something wrong, the codes will also run into error
+# close the webpage and repeat the login and continue the scraping
+# it is better if we can scrape at one time, but due to the restriction or some reason,
+# it is acceptable if we need to separate the scraping into many times
+remDr$close()
+
+# save the file
+write.csv(com_info, "profile_info.csv", row.names = FALSE)
+
+# terminate the selenium server
+system("taskkill /im java.exe /f")
+remote_driver$server$stop()
+```
+
+### 3.4 : Processing stock price data
+
+Set up environment and load in data
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+options(scipen=999, digits=4) # avoid scientific display, keep 4 digits in display
+rm(list=ls()) # clear Environment
+# Set the working directory
+dir_data <- setwd ("D:/Desktop/forecast and forensic analysis/group_project/merge/")
+
+
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(readxl)
+
+#load the stock price data
+stock_price <- read.csv("stock_price.csv")
+
+#load the followers_train data and followers_test data
+f_train <- read.csv("Followers_train.csv")
+f_test <- read.csv("Followers_test.csv")
+```
+
+We retrieve unique identifiers (gvkey) from f_train dataset, filters stock_data based on gvkey, and left joins f_train with stock_data. It then fills missing values with the most recent non-NA value in stock_data. Finally, we using summary( ) to check any missing values in the stock_data dataframe.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#get the unique gvkey as save it as an vector
+unique_gvkey <- unique(f_train$gvkey)
+
+#filter the stock_price data to only keep the relevent company
+stock_price <- stock_price[stock_price$gvkey %in% unique_gvkey,]
+
+# Create a sequence of date for the period 
+date_df <- data.frame(date = seq(from = ymd("2016-12-29"), to = ymd("2017-10-01"), by = "1 day"))
+
+# crossjoin the date_df and unique_gvkey to get the full combination of gvkey and date
+unique_gvkey <- as.data.frame(unique_gvkey)
+full_gvkey_date <- cross_join(unique_gvkey, date_df)
+colnames(full_gvkey_date) <- c("gvkey", "datadate")
+
+# left join stock_price to full_gvkey_date
+stock_data <- merge(x = full_gvkey_date, y = stock_price, by = c("gvkey", "datadate"), all = TRUE)
+
+# fill in the missing value with most recent non na value
+stock_data <- stock_data %>% 
+              group_by(gvkey) %>% 
+              fill(iid, conm, prccd, prchd, prcld, prcod,cik,sic, .direction = 'down') %>% 
+              ungroup()
+```
+
+Next, we calculate the percentage of daily change (p_daily_change) and the daily volatility (volatile) based on the stock data. It fills any missing values with zeros for certain columns and creates lag variables for both daily change and volatility. Finally, it provides a summary of the updated stock_data. We notice that there is 95 NA values for both daily change and volatility after the lag operation.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#calculate the percentage of daily change and mutate as p_daily_change. 
+stock_data <- stock_data%>%mutate(p_daily_change=(prccd-prcod)/prcod)
+
+#calculate the daily volatile and mutate as volatile. 
+stock_data <- stock_data%>%mutate(volatile=(prchd-prcld)/prcld)
+
+# fill in with 0 for NA value
+stock_data$prccd <- ifelse(is.na(stock_data$prccd), 0, stock_data$prccd)
+stock_data$prchd <- ifelse(is.na(stock_data$prchd), 0, stock_data$prchd)
+stock_data$prcld <- ifelse(is.na(stock_data$prcld), 0, stock_data$prcld)
+stock_data$prcod <- ifelse(is.na(stock_data$prcod), 0, stock_data$prcod)
+stock_data$p_daily_change <- ifelse(is.na(stock_data$p_daily_change), 0, stock_data$p_daily_change)
+stock_data$volatile <- ifelse(is.na(stock_data$volatile), 0, stock_data$volatile)
+
+# create lag variables for daily change and volatile
+stock_data <- stock_data %>% group_by(gvkey) %>% mutate(p_daily_change_lag = lag(p_daily_change)) %>% ungroup()
+stock_data <- stock_data %>% group_by(gvkey) %>% mutate(volatile_lag = lag(volatile)) %>% ungroup()
+```
+
+### 3.5 : Processing company announcements data
+
+The "key_developments.csv" data is loaded and filtered to retain only relevant companies based on CIK. Then, we convert the character column to the date, ensuring it's in the appropriate format.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#load the key_developments data
+key_dev <- read.csv("key_developments.csv")
+
+#filter the key_development data to only keep the relevent company
+key_dev <- key_dev[key_dev$cik %in% stock_data$cik,]
+
+# change character to date and number
+key_dev$date <- mdy(key_dev$kd_date)
+key_dev$date <- as.Date(key_dev$date, "%y/%m/%d")
+key_dev$cik = as.numeric(key_dev$cik)
+```
+
+Next, we creates a data frame (full_cik_date) for the full combination of CIK and dates from stock_data. Then, we merge key_dev with full_cik_date to get final key_dev_data. Lastly, we merge the resulting dataset (key_dev_data) with another dataset named stock_data based on CIKs and dates. This action integrates various financial datasets while handling potential issues such as duplicated records arising from multiple announcements by companies on the same day.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#get the unique cik as save it as an vector
+unique_cik <- unique(stock_data$cik)
+unique_cik <- as.data.frame(unique_cik)
+full_cik_date <- cross_join(unique_cik, date_df)
+
+# change character to date and number
+# full_cik_date$date <- mdy(full_cik_date$date)
+# full_cik_date$unique_cik = as.numeric(full_cik_date$unique_cik)
+summary(full_cik_date) 
+
+#left join key_dev to full_cik_date
+key_dev_data <- merge(x=full_cik_date,y=key_dev, 
+                      by.x=c("unique_cik","date"), 
+                      by.y=c("cik","date"), 
+                      all.x=TRUE)
+
+# merge into the full dataset
+# will have duplicated record if on one day a company has multiple announcements
+stock_announce <- merge(x = stock_data, y = key_dev_data, 
+                        by.x = c("cik", "datadate"), by.y = c("unique_cik", "date"),
+                        all.x = TRUE, all.y = TRUE)
+```
+
+We generate dummy variables indicating the presence of announcements, specifically identifying whether there is an announcement (is_announce) and whether it falls under predefined red flag event categories (red_announce), using predetermined types of red flag announcements from S&P Capital IQ. Subsequently, we count the number of announcements per gvkey and kd_date, merging this information back into the original dataset while handling missing values. This ensures data integrity by retaining only unique combinations of gvkey and datadate, facilitating clearer analysis of announcement data.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+# create announcement dummy variable
+stock_announce <- stock_announce %>% mutate(is_annouce = ifelse(is.na(kd_type), 0, 1))
+
+# red flag announcement
+red_kd_type <- c("Auditor Changes", "Auditor Going Concern Doubts", "Bankruptcy - Filing", "Business Reorganizations", "Credit Rating - S&P - Credit Watch/Outlook Action", "Credit Rating - S&P - Downgrade", "Credit Rating - S&P - Not-Rated Action", "Debt Defaults", "Delayed Earnings Announcements", "Delayed SEC Filings", "Delistings", "Discontinued Operations/Downsizings", "Halt of Operations - Unusual Events", "Impairments/Write Offs", "Index Constituent Drops", "Investor Activism - Activist Communication", "Labor-related Announcements", "Lawsuits & Legal Issues", "Regulatory Authority – Compliance", "Regulatory Authority – Enforcement Actions", "Restatements of Operating Results", "Regulatory Agency Inquiries")
+
+stock_announce <- stock_announce %>% mutate(red_annouce = ifelse(kd_type %in% red_kd_type, 1, 0))
+
+
+# count announcement
+number_annoucement <- stock_announce %>% drop_na(kd_date)
+number_annoucement <- number_annoucement %>% group_by(gvkey) %>% count(kd_date) %>% ungroup ()
+
+# merge number of annoucement and fill in NA with 0 and rename
+stock_announce <- merge(x = stock_announce, y = number_annoucement, by = c("gvkey", "kd_date"), all.x = TRUE)
+stock_announce$n <- ifelse(is.na(stock_announce$n), 0, stock_announce$n)
+stock_announce <- stock_announce %>% rename(no_annoucement = `n`)
+
+# distinct by gvkey and datadate
+stock_announce <- stock_announce %>% distinct(gvkey, datadate,.keep_all = TRUE)
+```
+
+### 3.6 : Processing financial data
+
+First, it loads financial ratio data and adjusts the dividend yield column to be in percentage form. Next, it reads training and testing datasets for followers. Then, it creates a unique vector of gvkey identifiers from the training set and generates a sequence of dates. Later, it performs a cross join operation to obtain a full combination of gvkey and dates, merges the financial ratios with relevant SIC codes, and calculates industry medians for various financial ratios (dpr, cash_ratio, quick_ratio, curr_ratio, inv_turn, sale_nwc). Finally, it filters the financial ratio data to retain only relevant company records based on gvkey and summarizes the resulting dataset. This sequence of operations prepares the financial data for subsequent analysis or modeling tasks.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#load the financial ratios data
+df <- read.csv("Financial Ratios.csv")
+
+##Turn divyield into percentage form
+df$divyield <- as.numeric(sub("%", "", df$divyield)) / 100
+
+#load the followers training and testing datasets
+train <- read.csv("Followers_train.csv")
+test <- read.csv("Followers_test.csv")
+
+#get the unique gvkey and save it as a vector
+unique_gvkey <- unique(train$gvkey)
+print(unique_gvkey)
+
+# Create a sequence of date for the period 
+date_df <- data.frame(date = seq(from = ymd("2016-09-30"), to = ymd("2017-11-30"), by = "1 day"))
+date_df <- date_df %>% mutate(mon = month(date), y = year(date))
+date_df <- date_df %>% arrange(desc(date)) %>% group_by(y, mon) %>% dplyr::slice(1) %>% ungroup()
+date_df <- select(date_df, -mon, -y) %>% arrange(date_df, date)
+
+# crossjoin the date_df and unique_gvkey to get the full combination of gvkey and date
+unique_gvkey <- as.data.frame(unique_gvkey)
+full_gvkey_date <- cross_join(unique_gvkey, date_df)
+colnames(full_gvkey_date) <- c("gvkey", "public_date")
+
+#load the stock price data to get the sic
+sic <- read.csv("sic.csv")
+sic <- sic %>% select(gvkey, sic) %>% distinct(gvkey, sic)
+
+df <- merge(full_gvkey_date, df, by = c("gvkey", "public_date"), all = TRUE)
+df <- merge(df, sic, by = "gvkey", all.x = TRUE)
+
+# create industry median to fill in na later
+df <- df %>% 
+  group_by(sic, public_date) %>% 
+  mutate(im_bm = median(bm,na.rm = TRUE)) %>% 
+  mutate(im_pe_exi = median(pe_exi,na.rm = TRUE)) %>%
+  mutate(im_ps = median(ps,na.rm = TRUE)) %>%
+  mutate(im_pcf = median(pcf,na.rm = TRUE)) %>%
+  mutate(im_dpr = median(dpr,na.rm = TRUE)) %>%
+  mutate(im_npm = median(npm,na.rm = TRUE)) %>%
+  mutate(im_opmbd = median(opmbd,na.rm = TRUE)) %>%
+  mutate(im_opmad = median(opmad,na.rm = TRUE)) %>%
+  mutate(im_gpm = median(gpm,na.rm = TRUE)) %>%
+  mutate(im_roa = median(roa,na.rm = TRUE)) %>%
+  mutate(im_roe = median(roe,na.rm = TRUE)) %>%
+  mutate(im_roce = median(roce,na.rm = TRUE)) %>%
+  mutate(im_debt_at = median(debt_at,na.rm = TRUE)) %>%
+  mutate(im_debt_assets = median(debt_assets,na.rm = TRUE)) %>%
+  mutate(im_de_ratio = median(de_ratio,na.rm = TRUE)) %>%
+  mutate(im_intcov = median(intcov,na.rm = TRUE)) %>%
+  mutate(im_cash_ratio = median(cash_ratio,na.rm = TRUE)) %>%
+  mutate(im_quick_ratio = median(quick_ratio,na.rm = TRUE)) %>%
+  mutate(im_curr_ratio = median(curr_ratio,na.rm = TRUE)) %>%
+  mutate(im_inv_turn = median(inv_turn,na.rm = TRUE)) %>%
+  mutate(im_at_turn = median(at_turn,na.rm = TRUE)) %>%
+  mutate(im_rect_turn = median(rect_turn,na.rm = TRUE)) %>%
+  mutate(im_sale_nwc = median(sale_nwc,na.rm = TRUE)) %>%
+  mutate(im_ptb = median(ptb,na.rm = TRUE)) %>%
+  mutate(im_divyield = median(divyield,na.rm = TRUE)) %>%
+  ungroup()
+
+# create industry median (not group by date) for certain variables
+# dpr, cash_ratio, quick_ratio, curr_ratio, inv_turn, sale_nwc
+df <- df %>% 
+  group_by(sic) %>%
+  mutate(im_total_bm = median(bm,na.rm = TRUE)) %>% 
+  mutate(im_total_pe_exi = median(pe_exi,na.rm = TRUE)) %>%
+  mutate(im_total_ps = median(ps,na.rm = TRUE)) %>%
+  mutate(im_total_pcf = median(pcf,na.rm = TRUE)) %>%
+  mutate(im_total_dpr = median(dpr,na.rm = TRUE)) %>%
+  mutate(im_total_npm = median(npm,na.rm = TRUE)) %>%
+  mutate(im_total_opmbd = median(opmbd,na.rm = TRUE)) %>%
+  mutate(im_total_opmad = median(opmad,na.rm = TRUE)) %>%
+  mutate(im_total_gpm = median(gpm,na.rm = TRUE)) %>%
+  mutate(im_total_roa = median(roa,na.rm = TRUE)) %>%
+  mutate(im_total_roe = median(roe,na.rm = TRUE)) %>%
+  mutate(im_total_roce = median(roce,na.rm = TRUE)) %>%
+  mutate(im_total_debt_at = median(debt_at,na.rm = TRUE)) %>%
+  mutate(im_total_debt_assets = median(debt_assets,na.rm = TRUE)) %>%
+  mutate(im_total_de_ratio = median(de_ratio,na.rm = TRUE)) %>%
+  mutate(im_total_intcov = median(intcov,na.rm = TRUE)) %>%
+  mutate(im_total_cash_ratio = median(cash_ratio,na.rm = TRUE)) %>%
+  mutate(im_total_quick_ratio = median(quick_ratio,na.rm = TRUE)) %>%
+  mutate(im_total_curr_ratio = median(curr_ratio,na.rm = TRUE)) %>%
+  mutate(im_total_inv_turn = median(inv_turn,na.rm = TRUE)) %>%
+  mutate(im_total_at_turn = median(at_turn,na.rm = TRUE)) %>%
+  mutate(im_total_rect_turn = median(rect_turn,na.rm = TRUE)) %>%
+  mutate(im_total_sale_nwc = median(sale_nwc,na.rm = TRUE)) %>%
+  mutate(im_total_ptb = median(ptb,na.rm = TRUE)) %>%
+  mutate(im_total_divyield = median(divyield,na.rm = TRUE)) %>%
+  ungroup()
+
+# create industry median (not group by date) for certain variables
+# dpr, cash_ratio, quick_ratio, curr_ratio, inv_turn, sale_nwc
+df <- df %>% 
+  mutate(total_bm = median(bm,na.rm = TRUE)) %>% 
+  mutate(total_pe_exi = median(pe_exi,na.rm = TRUE)) %>%
+  mutate(total_ps = median(ps,na.rm = TRUE)) %>%
+  mutate(total_pcf = median(pcf,na.rm = TRUE)) %>%
+  mutate(total_dpr = median(dpr,na.rm = TRUE)) %>%
+  mutate(total_npm = median(npm,na.rm = TRUE)) %>%
+  mutate(total_opmbd = median(opmbd,na.rm = TRUE)) %>%
+  mutate(total_opmad = median(opmad,na.rm = TRUE)) %>%
+  mutate(total_gpm = median(gpm,na.rm = TRUE)) %>%
+  mutate(total_roa = median(roa,na.rm = TRUE)) %>%
+  mutate(total_roe = median(roe,na.rm = TRUE)) %>%
+  mutate(total_roce = median(roce,na.rm = TRUE)) %>%
+  mutate(total_debt_at = median(debt_at,na.rm = TRUE)) %>%
+  mutate(total_debt_assets = median(debt_assets,na.rm = TRUE)) %>%
+  mutate(total_de_ratio = median(de_ratio,na.rm = TRUE)) %>%
+  mutate(total_intcov = median(intcov,na.rm = TRUE)) %>%
+  mutate(total_cash_ratio = median(cash_ratio,na.rm = TRUE)) %>%
+  mutate(total_quick_ratio = median(quick_ratio,na.rm = TRUE)) %>%
+  mutate(total_curr_ratio = median(curr_ratio,na.rm = TRUE)) %>%
+  mutate(total_inv_turn = median(inv_turn,na.rm = TRUE)) %>%
+  mutate(total_at_turn = median(at_turn,na.rm = TRUE)) %>%
+  mutate(total_rect_turn = median(rect_turn,na.rm = TRUE)) %>%
+  mutate(total_sale_nwc = median(sale_nwc,na.rm = TRUE)) %>%
+  mutate(total_ptb = median(ptb,na.rm = TRUE)) %>%
+  mutate(total_divyield = median(divyield,na.rm = TRUE)) %>%
+  ungroup()
+
+#filter the financial ratio data to keep only the relevant company
+unique_gvkey <- unique(train$gvkey)
+fin_ratios <- df[df$gvkey %in% unique_gvkey,]
+```
+
+We load financial data to computes various financial ratios to fill in missing values. It calculates ratios such as book-to-market ratio (computed_bm), price-to-earnings excluding extraordinary items (computed_pe_exi), price-to-sales (computed_ps), price-to-cash flow (computed_pcf), dividend payout ratio (computed_dpr), net profit margin (computed_npm), operating margin (computed_opmbd), and others. After merging the financials with relevant SIC codes, it computes industry medians for assets (atq). Then, it fills missing values using nearby non-NA values and replaces infinite values with NA. Finally, it summarizes the resulting dataset (**`fin_ratios`**), revealing the presence of NA values. This process prepares the financial data for further analysis or modeling tasks while addressing missing or erroneous values.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#load financials obtained from WDS compustat to compute the financial ratios to fill in missing values later
+financials <- read.csv("Financials.csv")
+
+
+#compute financial ratios using Financials data and keep asset variables for merging
+financials <- financials %>% 
+  mutate(computed_bm = teqq/mkvaltq,
+         computed_pe_exi = epsfxq,
+         computed_ps = mkvaltq/saleq,
+         computed_pcf = mkvaltq/((fincfy + ivncfy + oancfy)/ cshoq),
+         computed_dpr = dvpq/niq, 
+         computed_npm = niq/saleq,
+         computed_opmbd = oibdpq/saleq,
+         computed_opmad = oiadpq/saleq,
+         computed_gpm = ugiq/saleq,
+         computed_roa = niq/atq,
+         computed_roe = niq/teqq,
+         computed_roce = ibmiiq/icaptq,
+         computed_debt_asset = (dlttq+dlcq)/atq,
+         computed_de_ratio = ltq/teqq,
+         computed_int_cov = niq/tieq,
+         computed_cash_ratio = cheq/lctq,
+         computed_quick_ratio = (actq-invfgq)/lctq,
+         computed_curr_ratio = actq/lctq,
+         computed_inv_turn = cogsq/invfgq,
+         computed_at_turn = saleq/atq,
+         computed_rect_turn = saleq/rectq,
+         computed_sale_nwc = saleq/wcapq,
+         computed_ptb = mkvaltq/teqq,) %>%
+  mutate(public_date = as.Date(datadate)) 
+
+financials <- merge(financials, sic, by = "gvkey", all.x = TRUE)
+
+financials <- financials %>% 
+  group_by(sic, public_date) %>% 
+  mutate(im_atq = median(atq,na.rm = TRUE)) %>%
+  ungroup()
+
+median_atq <- financials %>%
+  select(sic, public_date, im_atq) %>% distinct(sic, public_date, im_atq)
+
+financials <- financials %>%
+  select(gvkey, public_date, atq, computed_bm,computed_pe_exi,computed_ps,computed_pcf,computed_dpr, 
+         computed_npm,computed_opmbd,computed_opmad,computed_gpm,computed_roa,
+         computed_roe,computed_roce,computed_debt_asset,computed_de_ratio,
+         computed_int_cov,computed_cash_ratio,computed_quick_ratio,
+         computed_curr_ratio,computed_inv_turn,computed_at_turn,computed_rect_turn,
+         computed_sale_nwc,computed_ptb)
+
+#filter the financial ratio data to only keep the relevant company gvkey
+financials <- financials[financials$gvkey %in% unique_gvkey,]
+
+#left_join financials to fin_ratios to fill in the NA values for gvkey1161 with computed dpr and roe 
+fin_ratios <- left_join(fin_ratios, financials)
+fin_ratios <- left_join(fin_ratios, median_atq)
+
+#fill in the missing value with most recent non na value
+fin_ratios <- fin_ratios %>%
+  arrange(gvkey, public_date) %>%
+  group_by(gvkey) %>%
+  fill(atq, computed_bm,computed_pe_exi,computed_ps,computed_pcf,computed_dpr, 
+       computed_npm,computed_opmbd,computed_opmad,computed_gpm,computed_roa,
+       computed_roe,computed_roce,computed_debt_asset,computed_de_ratio,
+       computed_int_cov,computed_cash_ratio,computed_quick_ratio,
+       computed_curr_ratio,computed_inv_turn,computed_at_turn,computed_rect_turn,
+       computed_sale_nwc,computed_ptb,im_atq,.direction = 'down') %>%
+  ungroup()
+
+# fill atq from up direction
+fin_ratios <- fin_ratios %>%
+  arrange(gvkey, public_date) %>%
+  group_by(gvkey) %>%
+  fill(atq,.direction = 'up') %>%
+  ungroup()
+
+
+# replace inf with NA
+fin_ratios <- fin_ratios %>% 
+  mutate_if(is.numeric, list(~replace(., !is.finite(.), NA)))
+summary(fin_ratios) #NA values
+```
+
+Next, we aim to fill in missing values in financial ratios (**`fin_ratios`**). We first replaces the NA values of specific financial ratios (e.g., bm, pe_exi, dpr, roe, roce, intcov, cash_ratio, etc.) with computed values. If the financials of these financial ratios are missing, we will then replaced the remaining NA values with industry medians. If NA values still exist after filling in with computed financial ratios and industry medians, we then continues to fill in remaining NA values using total industry medians. After imputation, it removes variables that might cause multicollinearity issues. The process iteratively handles missing data, ensuring that the dataset is prepared for subsequent analysis.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+
+# create a function for repeated fill in
+fill_in <- function(data, var, fillin){
+  data[[var]] <- ifelse(is.na(data[[var]]) | data[[var]] == "", data[[fillin]], data[[var]])
+  return(data)
+}
+
+#fill in with quarterly computed_fin_ratios for NA value
+fin_ratios <- fill_in(fin_ratios, "bm", "computed_bm")
+fin_ratios <- fill_in(fin_ratios, "pe_exi", "computed_pe_exi")
+fin_ratios <- fill_in(fin_ratios, "dpr", "computed_dpr")
+fin_ratios <- fill_in(fin_ratios, "roe", "computed_roe")
+fin_ratios <- fill_in(fin_ratios, "roce", "computed_roce")
+fin_ratios <- fill_in(fin_ratios, "intcov", "computed_int_cov")
+fin_ratios <- fill_in(fin_ratios, "cash_ratio", "computed_cash_ratio")
+fin_ratios <- fill_in(fin_ratios, "quick_ratio", "computed_quick_ratio")
+fin_ratios <- fill_in(fin_ratios, "curr_ratio", "computed_curr_ratio")
+fin_ratios <- fill_in(fin_ratios, "inv_turn", "computed_inv_turn")
+fin_ratios <- fill_in(fin_ratios, "rect_turn", "computed_rect_turn")
+fin_ratios <- fill_in(fin_ratios, "sale_nwc", "computed_sale_nwc")
+fin_ratios <- fill_in(fin_ratios, "ptb", "computed_ptb")
+
+# still has NA values bm 181
+# fill in with industry median on specific day for remaining NA value
+fin_ratios <- fill_in(fin_ratios, "bm", "im_bm")
+fin_ratios <- fill_in(fin_ratios, "pe_exi", "im_pe_exi")
+fin_ratios <- fill_in(fin_ratios, "ps", "im_ps")
+fin_ratios <- fill_in(fin_ratios, "pcf", "im_pcf")
+fin_ratios <- fill_in(fin_ratios, "dpr", "im_dpr")
+fin_ratios <- fill_in(fin_ratios, "npm", "im_npm")
+fin_ratios <- fill_in(fin_ratios, "opmbd", "im_opmbd")
+fin_ratios <- fill_in(fin_ratios, "opmad", "im_opmad")
+fin_ratios <- fill_in(fin_ratios, "gpm", "im_gpm")
+fin_ratios <- fill_in(fin_ratios, "roa", "im_roa")
+fin_ratios <- fill_in(fin_ratios, "roe", "im_roe")
+fin_ratios <- fill_in(fin_ratios, "roce", "im_roce")
+fin_ratios <- fill_in(fin_ratios, "debt_at", "im_debt_at")
+fin_ratios <- fill_in(fin_ratios, "debt_assets", "im_debt_assets")
+fin_ratios <- fill_in(fin_ratios, "de_ratio", "im_de_ratio")
+fin_ratios <- fill_in(fin_ratios, "intcov", "im_intcov")
+fin_ratios <- fill_in(fin_ratios, "cash_ratio", "im_cash_ratio")
+fin_ratios <- fill_in(fin_ratios, "quick_ratio", "im_quick_ratio")
+fin_ratios <- fill_in(fin_ratios, "curr_ratio", "im_curr_ratio")
+fin_ratios <- fill_in(fin_ratios, "inv_turn", "im_inv_turn")
+fin_ratios <- fill_in(fin_ratios, "at_turn", "im_at_turn")
+fin_ratios <- fill_in(fin_ratios, "rect_turn", "im_rect_turn")
+fin_ratios <- fill_in(fin_ratios, "sale_nwc", "im_sale_nwc")
+fin_ratios <- fill_in(fin_ratios, "ptb", "im_ptb")
+fin_ratios <- fill_in(fin_ratios, "divyield", "im_divyield")
+
+
+# still has NA values bm 38
+# fill in with industry median for remaining NA value
+fin_ratios <- fill_in(fin_ratios, "bm", "im_total_bm")
+fin_ratios <- fill_in(fin_ratios, "pe_exi", "im_total_pe_exi")
+fin_ratios <- fill_in(fin_ratios, "ps", "im_total_ps")
+fin_ratios <- fill_in(fin_ratios, "pcf", "im_total_pcf")
+fin_ratios <- fill_in(fin_ratios, "dpr", "im_total_dpr")
+fin_ratios <- fill_in(fin_ratios, "npm", "im_total_npm")
+fin_ratios <- fill_in(fin_ratios, "opmbd", "im_total_opmbd")
+fin_ratios <- fill_in(fin_ratios, "opmad", "im_total_opmad")
+fin_ratios <- fill_in(fin_ratios, "gpm", "im_total_gpm")
+fin_ratios <- fill_in(fin_ratios, "roa", "im_total_roa")
+fin_ratios <- fill_in(fin_ratios, "roe", "im_total_roe")
+fin_ratios <- fill_in(fin_ratios, "roce", "im_total_roce")
+fin_ratios <- fill_in(fin_ratios, "debt_at", "im_total_debt_at")
+fin_ratios <- fill_in(fin_ratios, "debt_assets", "im_total_debt_assets")
+fin_ratios <- fill_in(fin_ratios, "de_ratio", "im_total_de_ratio")
+fin_ratios <- fill_in(fin_ratios, "intcov", "im_total_intcov")
+fin_ratios <- fill_in(fin_ratios, "cash_ratio", "im_total_cash_ratio")
+fin_ratios <- fill_in(fin_ratios, "quick_ratio", "im_total_quick_ratio")
+fin_ratios <- fill_in(fin_ratios, "curr_ratio", "im_total_curr_ratio")
+fin_ratios <- fill_in(fin_ratios, "inv_turn", "im_total_inv_turn")
+fin_ratios <- fill_in(fin_ratios, "at_turn", "im_total_at_turn")
+fin_ratios <- fill_in(fin_ratios, "rect_turn", "im_total_rect_turn")
+fin_ratios <- fill_in(fin_ratios, "sale_nwc", "im_total_sale_nwc")
+fin_ratios <- fill_in(fin_ratios, "ptb", "im_total_ptb")
+fin_ratios <- fill_in(fin_ratios, "divyield", "im_total_divyield")
+
+
+# still has NA values bm 0， atq 150
+# fill in with total median for remaining NA value
+fin_ratios <- fill_in(fin_ratios, "cash_ratio", "total_cash_ratio")
+fin_ratios <- fill_in(fin_ratios, "quick_ratio", "total_quick_ratio")
+fin_ratios <- fill_in(fin_ratios, "curr_ratio", "total_curr_ratio")
+fin_ratios <- fill_in(fin_ratios, "inv_turn", "total_inv_turn")
+fin_ratios <- fill_in(fin_ratios, "sale_nwc", "total_sale_nwc")
+fin_ratios <- fill_in(fin_ratios, "divyield", "total_divyield")
+fin_ratios <- fill_in(fin_ratios, "atq", "im_atq")
+
+# no NA values for financial ratio, atq 3
+# remove variables for imputation
+fin_ratios <- fin_ratios %>%
+  select (gvkey, public_date, bm, pe_exi, ps, pcf, dpr, npm, opmbd, opmad, gpm, roa, roe, roce, debt_at, 
+          de_ratio, intcov, cash_ratio, quick_ratio, curr_ratio, inv_turn, at_turn, debt_assets, ptb,
+          rect_turn, sale_nwc, divyield, TICKER, atq)
+
+summary(fin_ratios)
+```
+
+We create monthly lag variables for each financial ratio in the **`fin_ratios`** dataset. It groups the data by **`gvkey`** and computes lagged values for each financial ratio. These lag variables enable the analysis of how changes in financial ratios over time correlate with subsequent outcomes, providing insights into financial performance trends and dynamics.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+# create monthly lag variables
+fin_ratios <- fin_ratios %>% 
+  group_by(gvkey) %>% 
+  mutate(bm_lag = lag(bm)) %>% 
+  mutate(pe_exi_lag = lag(pe_exi)) %>% 
+  mutate(ps_lag = lag(ps)) %>% 
+  mutate(pcf_lag = lag(pcf)) %>% 
+  mutate(dpr_lag = lag(dpr)) %>% 
+  mutate(npm_lag = lag(npm)) %>% 
+  mutate(opmbd_lag = lag(opmbd)) %>% 
+  mutate(opmad_lag = lag(opmad)) %>% 
+  mutate(gpm_lag = lag(gpm)) %>% 
+  mutate(roa_lag = lag(roa)) %>% 
+  mutate(roe_lag = lag(roe)) %>% 
+  mutate(roce_lag = lag(roce)) %>% 
+  mutate(debt_at_lag = lag(debt_at)) %>% 
+  mutate(de_ratio_lag = lag(de_ratio)) %>% 
+  mutate(intcov_lag = lag(intcov)) %>% 
+  mutate(cash_ratio_lag = lag(cash_ratio)) %>% 
+  mutate(quick_ratio_lag = lag(quick_ratio)) %>% 
+  mutate(curr_ratio_lag = lag(curr_ratio)) %>% 
+  mutate(inv_turn_lag = lag(inv_turn)) %>% 
+  mutate(at_turn_lag = lag(at_turn)) %>% 
+  mutate(rect_turn_lag = lag(rect_turn)) %>% 
+  mutate(sale_nwc_lag = lag(sale_nwc)) %>% 
+  mutate(divyield_lag = lag(divyield)) %>% 
+  mutate(debt_assets_lag = lag(debt_assets)) %>% 
+  mutate(ptb_lag = lag(ptb)) %>% 
+  ungroup()
+```
+
+We creating a **`date_df`** dataframe with a sequence of dates from 31 December 2016 to 30 November 2017. Then, it performs a cross-join operation between the unique **`gvkey`** values and **`date_df`** to obtain a full combination of **`gvkey`** and dates, stored in **`full_gvkey_date`**. Next, it left-joins **`fin_ratios`** with **`full_gvkey_date`**. After that, it fills in missing values in **`fin_ratios`** with the most recent non-NA value. This ensures that each **`gvkey`** has complete data for all dates in the specified period. Finally, the **`summary`** function is used to verify that there are no missing values left in **`fin_ratios`**.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#create a sequence of date for the period 
+date_df <- data.frame(date = seq(from = ymd("2016-12-31"), to = ymd("2017-11-30"), by = "1 day"))
+
+#crossjoin date_df and unique_gvkey to obtain full combination of gvkey and date
+unique_gvkey <- as.data.frame(unique_gvkey)
+full_gvkey_date <- cross_join(unique_gvkey, date_df)
+colnames(full_gvkey_date) <- c("gvkey", "public_date")
+
+#left join fin_ratios to full_gvkey_date
+fin_ratios <- merge(x = full_gvkey_date, y = fin_ratios, by = c("gvkey", "public_date"), all.x = TRUE)
+
+
+#fill in the missing value with most recent non na value
+fin_ratios <- fin_ratios %>%
+  arrange(gvkey, public_date) %>%
+  group_by(gvkey) %>%
+  fill(bm, pe_exi, ps, pcf, dpr, npm, opmbd, opmad, gpm, roa, roe, roce, debt_at, de_ratio, intcov,
+       cash_ratio, quick_ratio, curr_ratio, inv_turn, at_turn, rect_turn, debt_assets, ptb,
+       sale_nwc, divyield, atq, bm_lag, pe_exi_lag, ps_lag, pcf_lag, dpr_lag, npm_lag, opmbd_lag, 
+       opmad_lag, gpm_lag, roa_lag, roe_lag, roce_lag, debt_at_lag, de_ratio_lag, intcov_lag, 
+       cash_ratio_lag, quick_ratio_lag, curr_ratio_lag, inv_turn_lag, at_turn_lag, rect_turn_lag, 
+       debt_assets_lag, ptb_lag, sale_nwc_lag, divyield_lag,.direction = 'down') %>%
+  ungroup()
+  
+
+summary (fin_ratios) # no missing value
+```
+
+Finally, we left join between two datasets: **`stock_announce`** and **`fin_ratios`**, and we named the merged dataset as **`stock_announce_financials`**. The **`summary`** fuction reveals 190 NA values for financial data for 30 December and 31 December 2016.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+# merge into the full dataset
+# no financial data on 29/12/2016 and 30/12/2016
+stock_announce_financials <- left_join(x = stock_announce, y = fin_ratios,
+                                   by = c("gvkey" = "gvkey", "datadate" = "public_date"))
+summary(stock_announce_financials) # na 190 for financial data on 2016/12/30 and 2016/12/31
+```
+
+### 3.7 : Processing Twitter profile data
+
+We load two datasets which are profile and com_info respectively. After selecting specific columns from com_info, we left join profile and com_info based on the matching columns "user_name" and "username" and named it as "profile".
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(stringr)
+#load the company information data
+profile <- read.csv("profile_info.csv")
+com_info <- read_excel("company information.xlsx")
+com_info <- select(com_info, gvkey, conm, username)
+
+# merge profile to gvkey with username
+profile <- left_join(profile, com_info, by = c("user_name" = "username"))
+```
+
+We create a function named **`convert_to_numeric`** designed to transform string representations of numbers into numeric format, converting abbreviations like "K" for thousands and "M" for millions while handling commas. The function is then applied to the "profile_followers" and "profile_following" columns in the **`profile`** dataset to compute the Twitter Follower to Following Ratio (TFF). The summary of TFF reveals occurrences of infinite (INF) values, which denote companies with either no followers and zero following or those that have been acquired or are bankrupt.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#function to convert string representation of numbers into numeric format
+convert_to_numeric <- function(x) {
+  # Convert K (thousands) and M (millions) to numeric values
+  x_numeric <- gsub("K", "e3", x)  # Convert K to 10^3
+  x_numeric <- gsub("M", "e6", x_numeric)  # Convert M to 10^6
+  # Remove any commas and convert to numeric
+  as.numeric(gsub(",", "", x_numeric))
+}
+
+
+#apply the function to the profile_followers/profile_following column
+profile$profile_followers_num <- convert_to_numeric(profile$profile_followers)
+profile$profile_following_num <- convert_to_numeric(profile$profile_following)
+
+#compute twitter follower to following ratio (TFF)
+profile <- profile %>% mutate (TFF = profile_followers_num/ profile_following_num)
+summary (profile$TFF) #TFF has INF values 
+
+
+```
+
+Next, we adjust the Twitter Follower to Following Ratio (TFF) for companies with INF values by modifying the profile_following_num column. It replaces instances where profile_following_num equals zero with one to prevent division by zero, thereby ensuring numeric stability. Following this adjustment, the TFF is recalculated. The summary of TFF is examined to verify that there are no more occurrences of INF values, indicating successful handling of the issue.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#handle TFF=INF companies by changing profile_following_num = 0 to profile_following_num = 1
+profile <- profile%>%
+  mutate(profile_following_num = ifelse(profile_following_num == 0, 1, profile_following_num)) %>%
+  mutate (TFF = profile_followers_num/ profile_following_num)
+
+#examine TFF ratio should have no more INF
+summary (profile$TFF)
+```
+
+We calculate readability indices (Flesch score, Coleman-Liau, and FOG) for the profile biographies of individuals or entities. Using functions from the quanteda.textstats package, the code computes these indices and assigns them to corresponding columns in the profile dataframe. Additionally, the code counts the number of words in each biography using regular expressions and stores the counts in the num_words column. NA values in the word count column are replaced with 0 to indicate profiles with no biography.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+pacman :: p_load(quanteda.textstats)
+coleman_info <- textstat_readability(profile$profile_bio, "Coleman.Liau")
+flesch_info <- textstat_readability(profile$profile_bio, "Flesch")
+FOG_info <- textstat_readability(profile$profile_bio, "FOG")
+
+profile$coleman_liau <- coleman_info$Coleman.Liau.ECP
+profile$flesch <- flesch_info$Flesch
+profile$fog_info <- FOG_info$FOG
+
+#load the stock price data to get the sic
+sic <- read.csv("sic.csv")
+sic <- sic %>% select(gvkey, sic) %>% distinct(gvkey, sic)
+
+#left join to profile df to get profile by sic
+profile <- left_join(profile, sic)
+
+#compute industry median for readability to fill in NA later
+profile <- profile %>% group_by(sic) %>%
+  mutate(im_flesch = median(flesch,na.rm = TRUE)) %>%
+  mutate(im_coleman = median(coleman_liau,na.rm = TRUE)) %>%
+  mutate(im_FOG = median(fog_info,na.rm = TRUE)) %>%
+  ungroup()
+
+#compute median for all firms to fill in NA for those firm which is the only firm present in sic
+profile <- profile %>%
+  mutate(im_total_flesch = median(flesch,na.rm = TRUE)) %>%
+  mutate(im_total_coleman = median(coleman_liau,na.rm = TRUE)) %>%
+  mutate(im_total_FOG = median(fog_info,na.rm = TRUE))
+
+#fill in NA for readability using industry median.
+profile <- profile %>% 
+  mutate(flesch = ifelse(is.na(flesch), im_flesch, flesch)) %>%
+  mutate(coleman_liau = ifelse(is.na(coleman_liau), im_coleman, coleman_liau)) %>%  
+  mutate(fog_info = ifelse(is.na(fog_info), im_FOG, fog_info))
+
+#if the only firm present in sic is the NA firm, replace NA with median of all firm
+profile <- profile %>% 
+  mutate(flesch = ifelse(is.na(flesch), im_total_flesch, flesch)) %>%
+  mutate(coleman_liau = ifelse(is.na(coleman_liau), im_total_coleman, coleman_liau)) %>%  
+  mutate(fog_info = ifelse(is.na(fog_info), im_total_FOG, fog_info))
+
+summary(profile$coleman_liau)
+summary(profile$flesch)
+summary(profile$fog_info)
+
+str(profile$profile_bio) #character vector containing bio sentence
+
+# Use str_count to count the number of words in each sentence
+#"\S+" matches one or more non-whitespace characters in the string.
+profile$num_words <- str_count(profile$profile_bio, "\\S+")
+
+#NA means no profile bio, hence replace with 0 since no word count
+profile$num_words <- ifelse(is.na(profile$num_words),0,profile$num_words)
+str(profile$num_words)
+summary (profile$num_words)
+```
+
+We evaluate the completeness of user profiles, aiming to enhance search visibility. It assesses whether essential profile fields like name, category, website, bio, and username are populated or not. For each profile, it assigns a binary indicator, with '1' indicating a complete profile and '0' indicating an incomplete one. Additionally, it identifies profiles with URLs by checking if the website field is empty, assigning '1' for profiles with URLs and '0' otherwise.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#profile completeness increase the chance of people searching for profile.
+#check if profile data is complete
+profile$bio_complete <- ifelse(is.na(profile$profile_name) |is.na(profile$profile_category) |is.na(profile$profile_website) | 
+                                 is.na(profile$profile_bio) |is.na(profile$user_name), 0, 1)
+
+profile$has_url <- ifelse(is.na(profile$profile_website), 0, 1)
+```
+
+We create two variables ("hashtags_count", "has_hashtags")
+
+hashtags_count: The frequency of hashtags in the profile bio of the company's account
+
+has_hashtags: The profile bio of the company's account contains hashtags or not
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#compute the no of hashtags the profile bio has
+#function to count hashtags in each profile bio
+count_hashtags <- function(text) {
+  # Use str_count from stringr package to count occurrences of '#'
+  hashtags_count <- stringr::str_count(text, "#")
+  return(hashtags_count)
+}
+
+#apply the function to each profile bio to compute the no of hashtags
+profile$hashtags_count <- sapply(profile$profile_bio, count_hashtags)
+
+#NA means no profile bio, hence replace with 0 since no hashtag
+profile$hashtags_count <- ifelse(is.na(profile$hashtags_count),0,profile$hashtags_count)
+summary (profile$hashtags_count)
+
+#compute has hashtags variable (has hastag = 1, no hashtag = 0)
+profile$has_hashtags <- ifelse(profile$hashtags_count == 0, 0, 1)
+```
+
+We create three dummy variables ("Contains Company Name", "Contains Words", "Custom Content") based on the ARXIV article's classification of user names.
+
+Contains Name: This group contains users that have a given name in their name field that we could match to the Behind the Name data.
+
+Contains Words: This group contains all users that are not in the first group, but have at least one English word from the SIL list in their name field.
+
+Custom Content: This group contains all users that are neither in the first nor in the second group.
+
+It defines a function to categorize user names according to their similarity to company names or the presence of English words. Then, it applies this function to the user_name column and further adjusts certain specific user names to ensure accurate classification. Finally, it generates dummy variables to indicate each user's category, allowing for further analysis of profile completeness.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+#load the qdapDictionaries package
+pacman :: p_load(qdapDictionaries)
+
+#load the English words list
+data("words")
+
+#assign the words vector to english_words
+english_words <- words
+
+#function to categorize user_name based on conm
+categorize_user_name <- function(name, conm) {
+  if (grepl(tolower(conm), tolower(name))) {
+    return("Contains Company Name")
+  } else if (any(grepl(english_words, name))) {
+    return("Contains Words")
+  } else {
+    return("Custom Content")
+  }
+}
+
+#apply function to user_name column
+profile$user_name_category <- mapply(categorize_user_name, profile$user_name, profile$conm)
+
+profile <- profile %>% mutate(user_name_category = ifelse(user_name=="@AmericanExpress"|user_name=="@andersonsinc"
+                                                          |user_name == "@autodesk"|user_name == "@Avnet"
+                                                          |user_name == "@AvonInsider"|user_name == "@comcast"
+                                                          |user_name == "@DXCTechnology"|user_name == "@Wendys"
+                                                          |user_name == "@DPL_INC"|user_name == "@EatonVance"
+                                                          |user_name == "@Ford"|user_name == "@TEGNA"
+                                                          |user_name == "@L3HarrisTech"|user_name == "@CenterPoint"
+                                                          |user_name == "@Range_Resources"|user_name == "@Lowes"
+                                                          |user_name == "@SPGlobal"|user_name == "@OGEEnergyCorp"
+                                                          |user_name == "@ParkerHannifin"|user_name == "@Paychex"
+                                                          |user_name == "@Pentair"|user_name == "@PepsiCo"
+                                                          |user_name == "@SemtechCorp"|user_name == "@SherwinWilliams"
+                                                          |user_name == "@Sysco"|user_name == "@Walgreens"
+                                                          |user_name == "@footlocker"|user_name == "@Stifel"
+                                                          |user_name == "@Gartner_inc"|user_name == "@Sothebys"
+                                                          |user_name == "@mercury"|user_name == "@CableONEinc"
+                                                          |user_name == "@biogen"|user_name == "@Qualcomm"
+                                                          |user_name == "@Lindeplc"|user_name == "@DRHorton"
+                                                          |user_name == "@Wolfspeed"|user_name == "@Humana"
+                                                          |user_name == "@Chubb"|user_name == "@CamdenPM"
+                                                          |user_name == "@byodgaming"|user_name == "@Viavisolutions"
+                                                          |user_name == "@celandongroup"|user_name == "@AlbermarleCorp"
+                                                          |user_name == "@JosAbank"|user_name == "@HenrySchein"
+                                                          |user_name == "@mettlertoledo"|user_name == "@sleepnumber"
+                                                          |user_name == "@cebinc"|user_name == "@JuniperNetworks"
+                                                          |user_name == "@RedHat"|user_name == "@DICKS"
+                                                          |user_name == "@dominos"|user_name == "@iRobotCorp"
+                                                          |user_name == "@cynosureinc"|user_name == "@Phillips66Co"
+                                                          |user_name == "@ConstantContact"|user_name == "@LogMeIn"
+                                                          |user_name == "@MYRGroupInc",
+                                                          "Contains Company Name", user_name_category))
+#examine user_name category 
+user_name_category_examine <- profile %>% select(user_name, user_name_category, conm)
+
+
+#create 3 dummy variables
+profile <- profile %>% mutate(contains_company_name = ifelse(user_name_category == "Contains Company Name",1,0)) %>%
+  mutate(contains_words = ifelse(user_name_category == "Contains Words",1,0)) %>%
+  mutate(custom_content = ifelse(user_name_category == "Custom Content",1,0))
+
+summary(profile)
+```
+
+We generate a sequence of dates from 29 December 2016 to 1 October 2017. It then performs a cross join between the date sequence and unique gvkeys to create a full combination of gvkeys and dates. Afterward, it merges the profile information with the full combination based on gvkey using a left join, resulting in a dataset that includes profile data for each date within the specified period.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+# select need variables
+profile <- profile %>% select(-im_flesch, -im_coleman, -im_FOG, -im_total_coleman, -im_total_flesch, -im_total_FOG)
+summary(profile)
+
+# Create a sequence of date for the period 
+date_df <- data.frame(date = seq(from = ymd("2016-12-29"), to = ymd("2017-10-01"), by = "1 day"))
+
+# crossjoin the date_df and unique_gvkey to get the full combination of gvkey and date
+unique_gvkey <- as.data.frame(unique_gvkey)
+full_gvkey_date <- cross_join(unique_gvkey, date_df)
+colnames(full_gvkey_date) <- c("gvkey", "datadate")
+
+# left join profile info to full_gvkey_date
+profile_data <- left_join(x = full_gvkey_date, y = profile, by = "gvkey")
+
+```
+
+We calculates the number of days, years, and months a company has been active on Twitter from its joining date. It first converts the joining date into a standard format and then computes the number of days and years by calculating the difference between the joining date and the date of the data record. The number of months joined is calculated using the interval function. The analysis reveals 1662 NA values for the six companies that don't have Twitter accounts.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+str(profile_data$profile_joining_date)
+
+#extract month and year and remove "Joined"
+month_year <- gsub("Joined ", "", profile_data$profile_joining_date)
+
+#convert month_year to date format with default date = "01"
+profile_data$joining_date <- as.Date(paste(month_year, "01"), format = "%B %Y %d")
+
+#format the date as YYYY-MM-DD
+profile_data$joining_date <- format(profile_data$joining_date, "%Y-%m-%d")
+class(profile_data$joining_date) #character
+
+#convert joining_date to Date format
+profile_data$joining_date <- as.Date(profile_data$joining_date)
+class(profile_data$joining_date) #date
+
+#compute the number of days between joining_date and datadate
+profile_data$days_joined <- as.numeric(difftime(profile_data$datadate, profile_data$joining_date, units = "days"))
+class(profile_data$days_joined) #numeric
+
+#compute the number of years between joining_date and datadate
+#dividing by 365.25 instead of 365 accounts for leap years. 
+#a year has approximately 365.25 days on average due to the occurrence of leap years,
+profile_data$years_joined <- as.numeric(difftime(profile_data$datadate, profile_data$joining_date, units = "days") / 365.25)
+str(profile_data$years_joined)
+
+#compute no of months joined
+profile_data$months_joined <- as.numeric(interval(profile_data$joining_date, profile_data$datadate) %/% months(1))
+class(profile_data$months_joined) #numeric
+
+# 1662 NA for the six companies that don't have accounts
+summary(profile_data)
+unique(profile_data[is.na(profile_data$months_joined), ]$gvkey)
+```
+
+We left join operation to merge financial and profile data into a full dataset based on the matching gvkey and datadate. After the merge, it removes redundant columns and renames the remaining columns for clarity. The summary function indicates the presence of NA values, specifically 190 for financial data and 1663 for profile data.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+# merge into the full dataset
+full_data <- left_join(x = stock_announce_financials, y = profile_data,
+                      by = c("gvkey", "datadate"))
+full_data <- select(full_data, -conm.y, -sic.y)
+full_data <- full_data %>% rename(`conm` = conm.x, `sic` = sic.x)
+```
+
+We creates industry dummy variables and week dummy variables in the dataset named **`full_data`**. Industry dummy variables are generated based on the Standard Industrial Classification (SIC) codes, with a value of 1 assigned if the SIC code corresponds to a popular industry and 0 otherwise. Weekday dummy variables are created based on the day of the week for each observation, assigning a value of 1 if the observation falls on that particular day and 0 otherwise.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+
+# create industry dummy variable
+popular_ind <- c("2844", "3576", "3674", "3679", "3845", "5047", "5734", 
+                 "5812", "6147", "6200", "6211", "6282", "6311", "6798", "7370", "7372")
+full_data <- full_data %>% mutate(pop_ind = ifelse(sic %in% popular_ind, 1, 0))
+
+# create week dummy variable
+full_data <- full_data %>% mutate(weekday = weekdays(datadate))
+full_data <- full_data %>% mutate(is_mon = ifelse(weekday == "Monday", 1, 0))
+full_data <- full_data %>% mutate(is_tue = ifelse(weekday == "Tuesday", 1, 0))
+full_data <- full_data %>% mutate(is_wed = ifelse(weekday == "Wednesday", 1, 0))
+full_data <- full_data %>% mutate(is_thu = ifelse(weekday == "Thursday", 1, 0))
+full_data <- full_data %>% mutate(is_fri = ifelse(weekday == "Friday", 1, 0))
+full_data <- full_data %>% mutate(is_sat = ifelse(weekday == "Saturday", 1, 0))
+
+# save the full data
+summary(full_data) # NA 190 for financial data, NA 1663 for profile data
+write.csv(full_data, "full_data.csv", row.names = FALSE) 
+```
+
+## 4. Explanatory Data Analysis
+
+### 4.1 Prepare Train data for EDA and Modelling
+
+The data preparation process involves importing df (cleaned full dataset) created from the various data scrape and extracted. We then select all relevant financial and non financial variables alongside fixed-effect variables for model construction.
+
+First, we load "full_data.csv" as **`df`**, convert "sic" into a factor, selects specific financial and non financial variables from **`df`**, converts the "datadate" variable into an integer format suitable for merging.
+
+Subsequently, we load "Followers_train.csv" as **`train`**, load SIC data from "sic.csv" and merges it with the **`train`** data frame based on "gvkey". Finally, we filter and merge data from **`combined_var`** and **`train`** from 1 January 2017 to 30 June 2017.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+
+# avoid scientific display, keep 4 digits in display
+options(scipen=999, digits=4)
+# clear environment
+rm(list=ls()) 
+
+# store full_data as df.
+df<- read.csv("full_data.csv")
+
+#convert sic into factor 
+df$sic <- factor(df$sic)
+  
+#select the stock price, financial and profile variables from full data
+combined_vars <- df %>% select(sic, datadate, gvkey, atq, p_daily_change, volatile, p_daily_change_lag, volatile_lag, bm, pe_exi, ps, pcf, dpr, npm, opmbd, opmad, gpm, roa, roe, roce, debt_at, de_ratio, intcov, cash_ratio, quick_ratio, curr_ratio, inv_turn, at_turn, debt_assets, ptb, rect_turn, sale_nwc, divyield, bm_lag, pe_exi_lag, ps_lag, pcf_lag, dpr_lag, npm_lag, opmbd_lag, opmad_lag, gpm_lag, roa_lag, roe_lag, roce_lag, debt_at_lag, de_ratio_lag, intcov_lag, cash_ratio_lag, quick_ratio_lag, curr_ratio_lag, inv_turn_lag, at_turn_lag, debt_assets_lag, ptb_lag, rect_turn_lag, sale_nwc_lag, divyield_lag, is_annouce, red_annouce, no_annoucement, TFF, coleman_liau, flesch, fog_info, num_words, bio_complete, has_url, hashtags_count, has_hashtags, contains_company_name, contains_words, custom_content, days_joined, years_joined, months_joined, pop_ind, is_mon, is_tue, is_wed, is_thu, is_fri, is_sat)
+  
+#convert datadate into integer for merging
+combined_vars <- rename(combined_vars,date="datadate")
+combined_vars$date <- as.Date(combined_vars$date)
+combined_vars$date <- as.integer(format(combined_vars$date, "%Y%m%d"))
+  
+#merge to train data
+train <- read.csv("Followers_train.csv")
+
+#load the sic data to get the sic
+sic <- read.csv("sic.csv")
+sic <- sic %>% select(gvkey, sic) %>% distinct(gvkey, sic)
+
+#left join to train df to get sic
+#no missing sic
+train <- left_join(train, sic)
+
+combined_train <- combined_vars %>% filter(date>=20170101 & date<=20170630)
+Train <- left_join(combined_train,train,by=c("gvkey","date"))
+Train <- Train %>% 
+  select(-sic.x) %>% 
+  rename(`sic` = sic.y)
+
+```
+
+### 4.2 Outlier Management
+
+When performing data extraction of company's announcement, we noted 5 companies undergoing Merger and Acquistion (M&A) and 1 company undergoing liqudation.
+
+STANDARD REGISTER CO, GENZYME CORP, GENERAL CABLE CORP/DE and COMPELLENT TECHNOLOGIES INC was acquired by TAYLOR COMMUNICATIONS, SANOFI, PRYSMIAN and DELL respectively. VICOR CORP'S Twitter account was suspended and ARO LIQUIDATION INC was undering liquidation during the period of study.
+
+Hence, as part of outlier management, we will remove these 6 companies from our Train dataset in order to improve the accuracy of our regression models. We later fill in the followers of these 6 companies on our Test data separately based on their last day of followers in the Train dataset.
+
+```{r}
+
+# outlier management - filter/remove the 6 M&A co. who have no financial ratios/profile variables
+Train <- Train %>% filter(!gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548"))
+
+```
+
+As the dates in our Train dataset is not consecutive (i.e. there is missing dates in between lines of dataset.), we filled in the followers of the missing dates with the followers of the latest available dates for the respective companies. By doing this, we assume that there is no increase in followers for the missing dates.
+
+```{r}
+
+# fill in the number of followers with the latest available in early days
+Train <- Train %>%
+  arrange(gvkey, date) %>%
+  group_by(gvkey) %>%
+  fill(followers,.direction = 'down') %>%
+  ungroup()
+
+Train <- Train %>%
+  arrange(gvkey, date) %>%
+  group_by(gvkey) %>%
+  fill(sic,.direction = 'down') %>%
+  ungroup()
+
+#fill in the number of followers with the latest available in later days
+Train <- Train %>%
+  arrange(gvkey, date) %>%
+  group_by(gvkey) %>%
+  fill(followers,.direction = 'up') %>%
+  ungroup()
+
+Train <- Train %>%
+  arrange(gvkey, date) %>%
+  group_by(gvkey) %>%
+  fill(sic,.direction = 'up') %>%
+  ungroup()
+
+summary(Train) #no NA for followers and sic
+
+```
+
+### 4.3 Prepare Test data for Out of Sample prediction & Kaggle submission
+
+We first load "Followers_test.csv" before performing a left join on **`test`** with **`sic`**. This ensures that the **`test`** dataframe consist of SIC with no missing values. Consequently, **`test`** is merged with **`combined_vars`**. Also, we filter out specific "gvkey" (companies) lacking profile data from the final **`Test`** dataset. Duplicated sic.y columns generated from the merge are removed and the remaining sic.x column is renamed sic.
+
+```{r}
+# load followers test data
+test <- read.csv("Followers_test.csv")
+
+# left join sic to test df and then left join combined variables into test df to obtain Test
+test <- left_join(test, sic)
+Test<- left_join(test,combined_vars,by=c("gvkey","date"))
+
+# outlier management - filter/remove the 6 M&A co. who have no financial ratios/profile variables
+Test <- Test %>% 
+  filter(!gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548")) %>%
+  select(-sic.y) %>% 
+  rename(`sic` = sic.x)
+
+```
+
+### 4.4 Creation of Twitter Followers' growth rate
+
+As the companies in our dataset varies in size, so we recognise the need to use daily followers' growth rate instead of the actual number of followers as our dependent variable. By using the daily followers' growth rate, we normalize the follower counts across companies. Instead of dealing with absolute numbers, which may vary widely, we focus on the relative change in followers over time. This helps to remove the influence of company size and makes the model more robust.
+
+To achieve this, we compute the daily growth rate of followers for each company (gvkey) in the Train dataset. This involves creating a lagged variable, followers_lag, and calculating the growth rate based on current and lagged followers. Subsequently, we replace any infinite values with NA to ensure data integrity in both the Train and Test datasets. Lastly, we remove NA values from the Train dataset, with the expectation that only 89 NA values should remain.
+
+```{r}
+# create followers growth rate in Train data
+Train<- Train %>%
+  group_by(gvkey) %>%
+  mutate(followers_lag=lag(followers,1))%>%
+  mutate(growth_rate = (followers / lag(followers)-1)) %>%
+  ungroup()
+
+# convert infinite value to NA
+Train <- Train %>% 
+  mutate_if(is.numeric, list(~replace(., !is.finite(.), NA)))
+Test <- Test %>% 
+  mutate_if(is.numeric, list(~replace(., !is.finite(.), NA)))
+  
+# remove NA Value
+summary(Train) #89 NA values
+Train <- Train[complete.cases(Train), ] 
+
+summary(Test)
+
+```
+
+### 4.5 Analysis of the distribution of Financial ratios
+
+Subsequently, we perform Explanatory Data Analysis to better understand the relationship between dependent variable (Twitter followers growth rate) and some of the independent variables (, stock price, financial ratios and non-financial variables ). This in turn help us identify missing values, outliers, categorical variables, distributions, and correlations of the dataset.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+
+#examine the distribution of the profitability ratios variables
+Train %>% 
+  select(npm, opmbd, opmad, gpm, roa, roe, roce)%>%
+  ExpNumViz(target = NULL,
+            nlim = 10,
+            Page = c(2,2))
+```
+
+Observation: Majority of the companies profitability ratios are between 0 and 1, where the density peak at 0.2 to 0.3. The skewness in distribution of the profitability ratios are consistent across the different profitability ratios, with the exception of roa and roce which witness a wider spread of values between 0 and 0.5.
+
+```{r}
+#examine the distribution of liquidity and solvency ratios
+Train %>% 
+  select(curr_ratio, quick_ratio,cash_ratio,debt_assets,de_ratio)%>%
+  ExpNumViz(target = NULL,
+            nlim = 10,
+            Page = c(2,2))
+
+```
+
+Observations : Majority of the companies' liquidity ratios ranges between 0 and 2, with a few companies having higher ratios and performing better in terms of liquidity. However, most companies appears to be healthy in terms of solvency, with relatively lower debt to assets ratio. Debt to equity ratios peak at 1 indicating low reliance of debts compared to equity for these companies, indicative of companies' strong financial position with minimal financial risk associated with debt.
+
+```{r}
+#examine the distribution of valuation ratios
+Train %>% 
+  select(pe_exi, ptb, ps, pcf, dpr)%>%
+  ExpNumViz(target = NULL,
+            nlim = 10,
+            Page = c(2,2))
+
+```
+
+Observation: Price earnings (pe_exi) measures a company's current share price to its earnings per share. higher PE ratio suggests that investors are willing to pay more for each unit of earnings, indicating a potentially overvalued stock.
+
+Price to sales (ps) ratio helps evaluate a company's valuation relative to its sales. A lower PS ratio may indicate that the stock is undervalued compared to its revenue.
+
+Price to book (ptb) ratio compares a company's market capitalization to its book value per share (BVPS). A lower PTB ratio may suggest that the stock is undervalued relative to its book value.
+
+Price to cashflow (pcf) ratio compares a company's market capitalization to its cash flow per share. It helps assess a company's valuation relative to its cash flow generation. A lower PCF ratio may indicate that the stock is undervalued compared to its cash flow
+
+Majority of the companies has lower pe/ps/ptb/pcf ratio as suggested by the density plot may suggest possible chances of these companies stock being undervalued.
+
+Dividend payout ratio (dpr) provides valuable insights into how much of a company's earnings are returned to shareholders as dividends.The dpr is relatively consistent across industry indicative that most companies pays about the same proportions of their earnings as dividends compared to their industry peers
+
+### 4.6 Visual Analysis of Profile Bio Readability
+
+Using ggplot aes function, we perform visual analysis of the readability of the profile bio across the 95 companies
+
+```{r}
+#examine the readability across the profile bio of the 95 companies
+#fog_info
+ggplot(Train, aes(x=fog_info)) + geom_density(color="darkblue", fill="lightblue")+
+geom_vline(aes(xintercept=mean(fog_info)), color="red", linetype="dashed", size=1)
+
+#coleman_liau
+ggplot(Train, aes(x=coleman_liau)) + geom_density(color="darkblue", fill="lightblue")+
+geom_vline(aes(xintercept=mean(coleman_liau)), color="red", linetype="dashed", size=1)
+
+#flesch
+ggplot(Train, aes(x=flesch)) + geom_density(color="darkblue", fill="lightblue")+
+geom_vline(aes(xintercept=mean(flesch)), color="red", linetype="dashed", size=1)
+```
+
+Observation: the mean of flesch
+
+```{r}
+# select the columns containing financial ratios and profile variables
+variables_of_interest <- c("fog_info", "coleman_liau", "flesch")
+
+# create a boxplot for each variable
+boxplot(Train[, variables_of_interest], 
+        main = "Boxplot of Profile Variables",
+        xlab = "Variables",
+        ylab = "Values",
+        col = "skyblue",  # Boxplot color
+        border = "black", # Boxplot border color
+        horizontal = FALSE)  # Horizontal boxplot for better visualization if many variables
+```
+
+Observation: Fog_info and Coleman_liau measures readability of profile_bio in the same measure. The lower the score the better the readability. The Flesch score on the other hand is reflects better readability with a higher score.
+
+Intuitively, it measures the years of formal education required for reading a document. The interquartile range for the Fog_info measurement on the companies profile bios readability lies between 0 to 30 with a median of around 10. The low median (10) for Fog_info is indicative that the companies' profile bios can be generally understand by person with little formal education.
+
+While the measurement of Coleman_liau readability on the companies' profile bios has an interquartile range of 10-40 with a median of around 25. This indicates that the twitter companies profile bios can be easily understood by the general public, which is aligned to our understanding that most profile bio is designed to be well understood and appealing to Twitter followers.
+
+It is noted that there is a few outliers in the readability score which could be a result of removal of hashtags from the profile bio before assessing its readability. some of the profile bios are predominantly hashtags and removing the hashtags before assessing its readability can result in distorted results. In order to not penalise profile bios with many hashtags on readability, we balance it out by including the no of hashtags as part of our profile variables for prediction of Twitter followers growth.
+
+### 4.7 Descriptive Statistic Table
+
+Using the descriptive statistic table, we assess the mean, standard deviation, median of the financial variables. This provides insights on the financial ratio's distribution and variability.
+
+```{r}
+# examine the descriptive statistics (mean, standard deviation, median)
+library(psych)
+table_stat <- describe(Train)
+table_stat[,c(3,4,5,8,9)]
+```
+
+### 4.8 Multicollinearity Test
+
+To study the multicollinearity between financial variables, we construct a correlation matrix to explore pairwise correlations among the variables. By visualizing the correlation matrix using corrplot(), we are able to identify the correlated pairs. Consequently, we remove 1 of the correlated variables in our regression model to reduce the introduction of error term in the model (i.e.one of the assumptions of regression is that variables are not correlated.)
+
+```{r}
+# multicollinearity test on financial variables
+# select financial correlation variables
+correlation_fin_var <- Train %>% select(growth_rate, at_turn, atq, bm, cash_ratio, curr_ratio, 
+                                    de_ratio, debt_at, divyield, dpr, gpm, intcov, inv_turn, npm, 
+                                    opmad, opmbd, p_daily_change, pcf, pe_exi, ps, quick_ratio, 
+                                    rect_turn, roa, roce, roe, sale_nwc, volatile, is_fri, is_mon,
+                                    is_sat, is_thu, is_tue,is_wed, pop_ind)
+
+# correlation matrix
+library(corrplot)
+correlation <- cor(correlation_fin_var, use="pairwise.complete.obs")
+corrplot(correlation)
+```
+
+Similarly, we conducted a multicollinearity test on non-financial variables. We first construct a correlation matrix to explore pairwise correlations among non financial variables. By visualizing the correlation matrix using corrplot(), we aim to identify multicollinearity issues. It is worthy to note that the days_joined, months_joined and years_joined are highly correlated. Thus, we only retain days_joined variable in the construction of our non financial variables model as the days_joined variable has greater variability in terms of data compared to the other two.
+
+```{r}
+
+# multicollinearity test on non financial data
+
+# select non financial correlated variables
+correlation_non_fin_var <- Train %>% select(atq, is_annouce, red_annouce, no_annoucement, TFF, coleman_liau, flesch, fog_info, num_words, bio_complete, has_url, hashtags_count, has_hashtags, contains_company_name, contains_words, custom_content, days_joined, years_joined, months_joined,
+pop_ind,is_mon,is_tue,is_wed,is_thu,is_fri,is_sat)
+
+# correlation matrix
+cor(correlation_non_fin_var)
+library(corrplot)
+correlation <- cor(correlation_non_fin_var, use="pairwise.complete.obs")
+corrplot(correlation)
+
+```
+
+## 5. Financial Model
+
+### 5.1 Financial Model Construction
+
+In this section, we build a model utilizing financial data exclusively. The 6 models constructed based on financial ratios is as follows:
+
+Model 1: Financial ratios + stock price (daily change rate and daily volatile) + industry dummy (popular industry = 1) + week dummy + log (asset) 
+
+We create a linear regression model (**`Model1`**) to predict the growth rate (**`growth_rate`**). The formula for the model (**`Mod1_formula`**) is specified to capture the relationship between the growth rate and the predictor variables. Specifically, the formula encompasses financial ratios, along with indicators for each day of the week, and the logarithm of "atq" as a measure of company size.
+
+```{r}
+# Model 1 formula : stock price and financial ratios model
+
+Mod1_formula <- as.formula("growth_rate ~ bm + pe_exi + ps + pcf + dpr + npm + opmbd + opmad + gpm + roa + roe + roce + debt_at + de_ratio + intcov + cash_ratio + quick_ratio + curr_ratio + inv_turn + at_turn + debt_assets + ptb + rect_turn + sale_nwc + divyield + p_daily_change + volatile + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+  
+# run regression Model 1
+Model1 <- lm(Mod1_formula,data=Train)
+summary(Model1)
+```
+
+Model 2: Financial ratios lag value + stock price (daily change rate and daily volatile) + industry dummy (popular industry = 1) + week dummy + log (asset).
+
+We create a linear regression model (**`Model2`**) to predict the growth rate (**`growth_rate`**). The formula for the model (**`Mod2_formula`**) is specified to capture the relationship between the growth rate and a set of lagged predictor variables encompassing financial metrics, along with indicators for each day of the week, and the logarithm of "atq" as a measure of company size.
+
+```{r}
+# Model 2 formula : financial ratios (lag), stock price (lag)
+Mod2_formula <- as.formula("growth_rate ~ bm_lag + pe_exi_lag + ps_lag + pcf_lag + dpr_lag +
+                          npm_lag+ opmbd_lag + opmad_lag + gpm_lag + roa_lag +roe_lag + roce_lag +                           debt_at_lag + de_ratio_lag + intcov_lag + cash_ratio_lag + 
+                          quick_ratio_lag + curr_ratio_lag + inv_turn_lag + at_turn_lag +
+                          debt_assets_lag + ptb_lag + rect_turn_lag + sale_nwc_lag + 
+                          divyield_lag + p_daily_change_lag + volatile_lag +
+                          pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat +
+                          log(atq)")
+
+# run regression Model 2 
+Model2 <- lm(Mod2_formula,data=Train)
+summary(Model2)
+```
+
+Model 3: Financial ratios value + stock price (daily change rate and daily volatile) + industry dummy (popular industry = 1) + week dummy + log (asset) + industry fixed effect 
+
+This model is used to predict the growth rate (**`growth_rate`**) while incorporating industry fixed effects. The **`update()`** function is used to modify the original formula (**`Mod1_formula`**) by adding a categorical variable representing the industry (**`sic`**) as a fixed effect. This sic variable is converted into a factor using the **`factor()`** function.
+
+```{r}
+# run regression Model 3 : Model 1 with industry FE 
+Mod3_formula <- update(Mod1_formula, . ~ . + factor(sic))
+Model3 <- lm(Mod3_formula,data=Train)
+summary(Model3)
+```
+
+Model 4: Financial ratios lag value + stock price (daily change rate and daily volatile) + industry dummy (popular industry = 1) + week dummy + log (asset) + industry fixed effect 
+
+This model is used to predict the growth rate (**`growth_rate`**) while integrating lagged predictor variables and industry fixed effects. The formula for the model (**`Mod4_formula`**) is updated using the **`update()`** function, where the original formula (**`Mod2_formula`**) is modified to include the industry (**`sic`**) as a fixed effect. The industry variable is converted into a factor using the **`factor()`** function.
+
+```{r}
+# run regression Model 4 : Model 2 with industry FE 
+Mod4_formula <- update(Mod2_formula, . ~ . + factor(sic))
+Model4 <- lm(Mod4_formula,data=Train)
+summary(Model4)
+```
+
+Model 5: Financial ratios value + stock price (daily change rate and daily volatile) + industry dummy (popular industry = 1) + week dummy + log (asset) + industry fixed effect +firm fixed effect
+
+This model is used to forecast the growth rate (**`growth_rate`**) while incorporating both lagged predictor variables, firm fixed effects (**`gvkey`**), and industry fixed effects (**`sic`**). The formula for the model (**`Mod5_formula`**) is updated using the **`update()`** function, where the original formula (**`Mod2_formula`**) is modified to include firm fixed effects (**`gvkey`**) and industry fixed effects (**`sic`**). Both **`gvkey`** and **`sic`** are converted into factors using the **`factor()`** function.
+
+```{r}
+# run regression Model 5 : Model 2 with company FE and industry FE 
+Mod5_formula <- update(Mod2_formula, . ~ . + factor(gvkey) + factor(sic))
+Model5 <- lm(Mod5_formula,data=Train)
+summary(Model5)
+```
+
+Model 6: Financial ratios lag value + stock price (daily change rate and daily volatile) + industry dummy (popular industry = 1) + week dummy + log (asset) + industry fixed effect +firm fixed effect
+
+This model is used to predict the growth rate (**`growth_rate`**) while incorporating industry fixed effects (**`sic`**) and firm fixed effects (**`gvkey`**). The formula for the model (**`Mod6_formula`**) is updated using the **`update()`** function, where the original formula (**`Mod1_formula`**) is modified to include both firm and industry fixed effects. Both **`gvkey`** and **`sic`** are converted into factors using the **`factor()`** function.
+
+```{r}
+# run regression Model 6 : Model 1 with company FE and industry FE 
+Mod6_formula <- update(Mod1_formula, . ~ . + factor(gvkey) + factor(sic))
+Model6 <- lm(Mod6_formula,data=Train)
+summary(Model6)
+```
+
+### 5.2 Financial (remove correlated variables)
+
+We also constructed six more models with highly correlated variables removed based on the multicollinearity test conducted in section 4.5 of EDA. Specifically, we remove roce, quick_ratio, opmbd and opmad from our model before running the regression again.
+
+```{r}
+# remove some high correlated variables
+# remove roce,quick_ratio,opmbd,opmad
+
+Mod7_formula<- as.formula("growth_rate ~ bm + pe_exi + ps + pcf + dpr + npm + gpm + roa + roe + debt_at + de_ratio + intcov + cash_ratio  + curr_ratio + inv_turn + at_turn +debt_assets + ptb + rect_turn + sale_nwc + divyield + p_daily_change +  volatile + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+
+Mod8_formula<- as.formula("growth_rate ~ bm_lag + pe_exi_lag + ps_lag + pcf_lag + dpr_lag +
+npm_lag + gpm_lag + roa_lag +roe_lag + debt_at_lag + de_ratio_lag + intcov_lag + cash_ratio_lag + curr_ratio_lag + inv_turn_lag + at_turn_lag + debt_assets_lag + ptb_lag + rect_turn_lag + sale_nwc_lag + divyield_lag + p_daily_change_lag + volatile_lag + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+
+```
+
+```{r}
+# # run regression Model7 : stock price and financial ratios (remove correlated variables)
+Model7 <- lm(Mod7_formula,data=Train)
+
+# run regression Model8 : stock price (lag) and financial ratios (lag, remove correlated variables)
+Model8 <-lm(Mod8_formula,data=Train)
+
+# run regression Model9 : Model7 (remove correlated variables) with industry FE
+Mod9_formula <- update(Mod7_formula, . ~ . + factor(sic))
+Model9 <- lm(Mod9_formula,data=Train)
+
+# run regression Model10 : Model8 (lag, remove correlated variables) with industry FE
+Mod10_formula <- update(Mod8_formula, . ~ . + factor(sic))
+Model10 <-lm(Mod10_formula,data=Train)
+
+# run regression Model11 : Model7 (remove correlated variables) with industry FE and firm FE
+Mod11_formula <- update(Mod7_formula, . ~ . + factor(gvkey) + factor(sic))
+Model11 <-lm(Mod11_formula,data=Train)
+
+# run regression Model12 : Model8 (lag, remove correlated variables) with industry FE and firm FE
+Mod12_formula <- update(Mod8_formula, . ~ . + factor(gvkey) + factor(sic))
+Model12 <-lm(Mod12_formula,data=Train)
+
+```
+
+### 5.3 In Sample Evaluation
+
+The growth rates are predicted using twelve different models (Model1 through Model12) and stored in separate variables (**`Train$Pre_rate_1`** through **`Train$Pre_rate_6`**) within the **`Train`** dataset. These predicted growth rates are then used to estimate the followers for each model, considering the lagged followers and the predicted growth rates. The root mean square error (RMSE) function (**`rmse()`**) calculates the accuracy of each model by comparing the actual followers with the predicted followers, offering an in-sample accuracy assessment. Finally, the RMSE values for each model are computed.
+
+```{r}
+# predict followers growth rate on Train
+Train$Pre_rate_1 <- predict(Model1, Train)
+Train$Pre_rate_2 <- predict(Model2, Train)
+Train$Pre_rate_3 <- predict(Model3, Train)
+Train$Pre_rate_4 <- predict(Model4, Train)
+Train$Pre_rate_5 <- predict(Model5, Train)
+Train$Pre_rate_6 <- predict(Model6, Train)
+Train$Pre_rate_7 <- predict(Model7, Train)
+Train$Pre_rate_8 <- predict(Model8, Train)
+Train$Pre_rate_9 <- predict(Model9, Train)
+Train$Pre_rate_10 <- predict(Model10, Train)
+Train$Pre_rate_11 <- predict(Model11, Train)
+Train$Pre_rate_12 <- predict(Model12, Train)
+  
+# compute Train predicted followers based on predicted growth rate
+Train$Followers_M1 <- (1+Train$Pre_rate_1)*Train$followers_lag
+Train$Followers_M2 <- (1+Train$Pre_rate_2)*Train$followers_lag
+Train$Followers_M3 <- (1+Train$Pre_rate_3)*Train$followers_lag
+Train$Followers_M4 <- (1+Train$Pre_rate_4)*Train$followers_lag
+Train$Followers_M5 <- (1+Train$Pre_rate_5)*Train$followers_lag
+Train$Followers_M6 <- (1+Train$Pre_rate_6)*Train$followers_lag
+Train$Followers_M7 <- (1+Train$Pre_rate_7)*Train$followers_lag
+Train$Followers_M8 <- (1+Train$Pre_rate_8)*Train$followers_lag
+Train$Followers_M9 <- (1+Train$Pre_rate_9)*Train$followers_lag
+Train$Followers_M10 <- (1+Train$Pre_rate_10)*Train$followers_lag
+Train$Followers_M11 <- (1+Train$Pre_rate_11)*Train$followers_lag
+Train$Followers_M12 <- (1+Train$Pre_rate_12)*Train$followers_lag
+  
+# compute In Sample Accuracy
+rmse <- function(v1, v2) {
+    sqrt(mean((v1 - v2)^2, na.rm = T))
+  }
+  
+
+RMSE <- c(rmse(Train$followers,Train$Followers_M1),
+          rmse(Train$followers,Train$Followers_M2),
+          rmse(Train$followers,Train$Followers_M3),
+          rmse(Train$followers,Train$Followers_M4),
+          rmse(Train$followers,Train$Followers_M5),
+          rmse(Train$followers,Train$Followers_M6),
+          rmse(Train$followers,Train$Followers_M7),
+          rmse(Train$followers,Train$Followers_M8),
+          rmse(Train$followers,Train$Followers_M9),
+          rmse(Train$followers,Train$Followers_M10),
+          rmse(Train$followers,Train$Followers_M11),
+          rmse(Train$followers,Train$Followers_M12))
+  
+# retrieve RMSE for all 12 financial models
+names(RMSE) <- c("Model1", "Model2", "Model3", "Model4","Model5","Model6",
+                "Model7", "Model8", "Model9", "Model10","Model11","Model12")
+RMSE
+```
+
+### 5.4 Prediction of Test followers
+
+We retrieve the number of followers for each company (**`gvkey`**) from the train data, sorts the data in descending order by **`gvkey`** and date. Subesquently, we used the slice (1) function to obtain the last day's followers of each company in the train dataset.
+
+The last day's followers is then joined with the test data using a full join on **`gvkey`** and **`date`**. This ensures that each company's last day followers from the Train data are paired with corresponding rows in the test data.
+
+Using the regression Model, we then perform out of sample prediction for growth rates on the test data. With a while loop, the code fills the missing values of the **`followers`** column in the test data by iteratively calculating the followers using the daily predicted growth rate and the lagged followers value. This continues until no missing values are left.
+
+```{r}
+#obtain the last day no.of followers from training data and apply the growth rate for Test data. 
+last_day_followers <- train %>%
+  group_by(gvkey) %>%
+  arrange(gvkey, desc(date)) %>%
+  dplyr::slice(1) %>%
+  ungroup()
+
+# remove the 6 outlier companies
+last_day_followers <- last_day_followers %>% filter(!gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548"))
+
+# create a function to fill in test data with the predicting result
+predict_test <- function(last_day_followers, Test_data, Model_no){
+  
+  Test_temp <- full_join(last_day_followers, Test_data, by = join_by(gvkey, date)) %>%
+    arrange(gvkey, date) %>%
+    select(-sic.x) %>%
+    rename(`sic` = sic.y) %>% 
+    select(-ID.x) %>%
+    rename(`ID` = ID.y)
+  
+  Test_temp <- Test_temp %>% mutate(Pre_rate_1 = predict(Model_no, Test_temp))
+  
+  while (any(is.na(Test_temp[["followers"]]))) {
+    Test_temp <- Test_temp %>%
+      mutate(followers= ifelse(is.na(followers), lag(followers) * (1+Pre_rate_1), followers))
+  }
+  
+  return (Test_temp)
+  
+}
+
+
+Test1 <- predict_test(last_day_followers, Test, Model1)
+Test2 <- predict_test(last_day_followers, Test, Model2)
+Test3 <- predict_test(last_day_followers, Test, Model3)
+Test4 <- predict_test(last_day_followers, Test, Model4)
+Test5 <- predict_test(last_day_followers, Test, Model5)
+Test6 <- predict_test(last_day_followers, Test, Model6)
+Test7 <- predict_test(last_day_followers, Test, Model7)
+Test8 <- predict_test(last_day_followers, Test, Model8)
+Test9 <- predict_test(last_day_followers, Test, Model9)
+Test10 <- predict_test(last_day_followers, Test, Model10)
+Test11 <- predict_test(last_day_followers, Test, Model11)
+Test12 <- predict_test(last_day_followers, Test, Model12)
+```
+
+In this section, we fill in the number of followers for six special companies not included in our initial model. We adopt two methods to achieve this. Initially, we merge the testing data (Test) with financial variables (combined_vars) based on the company identifier (gvkey) and date. We then extract the last day's number of followers for these six companies from the training data (Train), ensuring inclusion of only the required companies.
+
+Subsequently, we fill in missing values in the followers' column with the latest available data from earlier dates for each of the six companies. This is accomplished using the fill() function, which propagates non-missing values forward to ensure completeness in the dataset. Finally, the resulting dataset (Test_6) is organized by gvkey, date, and other relevant identifiers, providing a complete set of observations for the specified companies.
+
+```{r}
+
+# fill in those six companies with last day in June
+# should have 313 obs
+Test_6<- left_join(test,combined_vars,by=c("gvkey","date"))
+Test_6 <- Test_6 %>% filter(gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548"))
+
+last_day_followers_6 <- train %>%
+  group_by(gvkey) %>%
+  arrange(gvkey, desc(date)) %>%
+  dplyr::slice(1) %>%
+  ungroup()
+
+last_day_followers_6 <- last_day_followers_6 %>% filter(gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548"))
+Test_6 <- full_join(last_day_followers_6, Test_6)
+Test_6 <- Test_6 %>% arrange(gvkey, date)
+
+# fill in the number of followers with the latest available in early days
+Test_6 <- Test_6 %>%
+  arrange(gvkey, date) %>%
+  group_by(gvkey) %>%
+  fill(followers,.direction = 'down') %>%
+  ungroup()
+Test_6 <- Test_6 %>% select(gvkey, date, followers, ID)
+```
+
+We fill in missing data for six specific companies based on calculated growth rates. Initially, the testing data (**`Test_6`**) is merged with financial variables (**`combined_vars`**) using the company identifier (**`gvkey`**) and the date. Then, a date sequence from 1 July 2017 to 30 September 2017 is generated to ensure comprehensive coverage.
+
+Next, we cross join between the unique **`gvkey`** values and the date sequence to obtain a full combination of **`gvkey`** and date. The date format is converted into integers for merging purposes.
+
+The last day's followers for the six companies are extracted from the training data and joined with **`Test_6`**. Following this, the growth rates from the training data for the period 31 March to 30 June are combined.
+
+Subsequently, missing values in the followers' column are filled with the latest available data from both earlier and later dates for each company, ensuring completeness in the dataset.
+
+However, this fill in method doesn't give us improved results compared with the first fill in method, so we don't use this approach and just put it here for showing different approaches we have tried.
+
+```{r}
+#-------------------start of second fill in method----------------------------------#
+# fill in those six companies with calculated based on growth rate
+#Test_6<- left_join(test,combined_vars,by=c("gvkey","date"))
+#Test_6 <- Test_6 %>% filter(gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548"))
+
+# create date sequence
+#date_df <- data.frame(date = seq(from = ymd("2017-07-01"), to = ymd("2017-09-30"), by = "1 day"))
+
+# crossjoin the date_df and unique_gvkey to get the full combination of gvkey and date
+#unique_gvkey <- as.data.frame(unique(Test_6$gvkey))
+#full_gvkey_date <- cross_join(unique_gvkey, date_df)
+#colnames(full_gvkey_date) <- c("gvkey", "date")
+
+## Convert datadate into integer for merging
+#full_gvkey_date$date<- as.Date(full_gvkey_date$date)
+#full_gvkey_date$date<- as.integer(format(full_gvkey_date$date, "%Y%m%d"))
+
+# merge Test_6 to full_gvkey_date
+#Test_6 <- merge(x = full_gvkey_date, y = Test_6, by = c("gvkey", "date"), all = TRUE)
+
+#last_day_followers_6 <- train %>%
+#  group_by(gvkey) %>%
+#  arrange(gvkey, desc(date)) %>%
+#  dplyr::slice(1) %>%
+#  ungroup()
+#last_day_followers_6 <- last_day_followers_6 %>% filter(gvkey %in% c("10005", "12233", "21238", "25405", #"147661", "178548"))
+#Test_6 <- full_join(last_day_followers_6, Test_6)
+#Test_6 <- Test_6 %>% arrange(gvkey, date)
+
+
+# combine with growth rate in train data from 03/31 to 06/30
+#Train_6 <- left_join(combined_vars_train,train,by=c("gvkey","date"))
+#Train_6 <- select(Train_6, -sic.x)
+#Train_6 <- Train_6 %>% rename(`sic` = sic.y)
+#summary(Train_6)
+
+# remove 6 companies that don't have account
+#Train_6 <- Train_6 %>% filter(gvkey %in% c("10005", "12233", "21238", "25405", "147661", "178548"))
+#summary(Train_6) # no NA for vars need
+
+# fill in the number of followers with the latest available in early days
+#Train_6 <- Train_6 %>%
+#  arrange(gvkey, date) %>%
+#  group_by(gvkey) %>%
+#  fill(followers,.direction = 'down') %>%
+#  ungroup()
+
+#Train_6 <- Train_6 %>%
+#  arrange(gvkey, date) %>%
+#  group_by(gvkey) %>%
+#  fill(sic,.direction = 'down') %>%
+#  ungroup()
+
+# fill in the number of followers with the latest available in later days
+#Train_6 <- Train_6 %>%
+#  arrange(gvkey, date) %>%
+#  group_by(gvkey) %>%
+#  fill(followers,.direction = 'up') %>%
+#  ungroup()
+
+#Train_6 <- Train_6 %>%
+#  arrange(gvkey, date) %>%
+#  group_by(gvkey) %>%
+#  fill(sic,.direction = 'up') %>%
+#  ungroup()
+
+#summary(Train_6) # no NA for followers and sic
+```
+
+We calculate growth rates for each company in the dataset **`Train_6`** by comparing current followers to the lagged followers. After computing the growth rates, the summary reveals 6 NA values, indicating missing or insufficient data for certain companies. The subsequent instruction aims to ensure that both **`Train_6`** and the testing dataset **`Test`** contain the expected number of observations (465) and are organized by **`gvkey`** and date, ensuring consistency in analysis and modeling efforts.
+
+```{r}
+#Train_6<- Train_6 %>%
+#  group_by(gvkey) %>%
+#  mutate(followers_lag=lag(followers,1))%>%
+#  mutate(growth_rate = (followers / lag(followers)-1)) %>%
+#  ungroup()
+
+## 6 NA Value for growth rate
+# make sure Train_6 and Test both have 465 obs and arrange by gvkey and date
+#summary(Train_6)
+```
+
+In this process, we streamline the datasets Train_6 and Test_6 by removing extraneous columns and filtering out specific gvkey records. Both datasets are sorted by gvkey and date to maintain consistency. Subsequently, Train_6 columns are merged with Test_6 to synchronize the data. Any missing values in the followers column of Test_6 are filled iteratively using a growth rate formula. Finally, we retain only the essential columns (gvkey, date, followers, ID) in Test_6 and ensure that the date is after 30 June 2017, and that ID is not missing. This method ensures Test_6 contains the required 313 observations and is ready for further analysis.
+
+```{r}
+#Train_6 <- Train_6 %>% select(date, gvkey, growth_rate)
+#Train_6 <- Train_6 %>% filter(date > 20170329)
+#Train_6 <- Train_6 %>% filter(!gvkey == 21238)
+#Train_6 <- Train_6 %>% arrange(gvkey, date)
+#Test_6 <- Test_6 %>% select(gvkey, date, followers, ID)
+#Test_6 <- Test_6 %>% filter(!gvkey == 21238)
+#Test_6 <- Test_6 %>% arrange(gvkey, date)
+
+# bind columns of Train_6 and Test_6
+#Test_6 <- cbind(Test_6, Train_6)
+#while (any(is.na(Test_6$followers))) {
+#  Test_6$followers = ifelse(is.na(Test_6$followers), 
+#                            lag(Test_6$followers) * (1+Test_6$growth_rate), 
+#                            Test_6$followers)
+#}
+
+# bind rows with Test data and then innerjoin with submit sample
+# make sure the first four columns are gvkey, date, followers ID
+# Test_6 should have 313 obs
+#Test_6 <- Test_6[,1:4]
+#Test_6 <- Test_6 %>% filter(date > 20170630 & !is.na(ID))
+#--------------------end of second fill in method---------------------------------------#
+```
+
+We merge the six specific companies with the rest of the dataset. The merged data is filtered to include only records from 1 July 2017 onwards. The follower counts are rounded to ensure integer values. From the resulting dataset, only the columns for ID and followers are selected, representing the necessary data for submission. This subset of data is saved as a CSV file named "submission_M1_fin.csv", excluding row numbers.
+
+```{r}
+pacman::p_load(tidyverse)
+# merge the six companies with other companies
+Test_submission1 <- Test1 %>% select(gvkey, date, followers, ID)
+Test_submission1 <- rbind(Test_submission1, Test_6)
+Test_submission1 <- Test_submission1 %>% filter(date>=20170701)
+Test_submission1$followers <- round(Test_submission1$followers)
+Followers_submisson_M1 <- Test_submission1 %>% select(ID, followers)  
+
+Test_submission2 <- Test2 %>% select(gvkey, date, followers, ID)
+Test_submission2 <- rbind(Test_submission2, Test_6)
+Test_submission2 <- Test_submission2 %>% filter(date>=20170701)
+Test_submission2$followers <- round(Test_submission2$followers)
+Followers_submisson_M2 <- Test_submission2 %>% select(ID, followers)  
+
+Test_submission3 <- Test3 %>% select(gvkey, date, followers, ID)
+Test_submission3 <- rbind(Test_submission3, Test_6)
+Test_submission3 <- Test_submission3 %>% filter(date>=20170701)
+Test_submission3$followers <- round(Test_submission3$followers)
+Followers_submisson_M3 <- Test_submission3 %>% select(ID, followers)
+
+Test_submission4 <- Test4 %>% select(gvkey, date, followers, ID)
+Test_submission4 <- rbind(Test_submission4, Test_6)
+Test_submission4 <- Test_submission4 %>% filter(date>=20170701)
+Test_submission4$followers <- round(Test_submission4$followers)
+Followers_submisson_M4 <- Test_submission4 %>% select(ID, followers)  
+
+Test_submission5 <- Test5 %>% select(gvkey, date, followers, ID)
+Test_submission5 <- rbind(Test_submission5, Test_6)
+Test_submission5 <- Test_submission5 %>% filter(date>=20170701)
+Test_submission5$followers <- round(Test_submission5$followers)
+Followers_submisson_M5 <- Test_submission5 %>% select(ID, followers)  
+
+Test_submission6 <- Test6 %>% select(gvkey, date, followers, ID)
+Test_submission6 <- rbind(Test_submission6, Test_6)
+Test_submission6 <- Test_submission6 %>% filter(date>=20170701)
+Test_submission6$followers <- round(Test_submission6$followers)
+Followers_submisson_M6 <- Test_submission6 %>% select(ID, followers)  
+
+Test_submission7 <- Test7 %>% select(gvkey, date, followers, ID)
+Test_submission7 <- rbind(Test_submission7, Test_6)
+Test_submission7 <- Test_submission7 %>% filter(date>=20170701)
+Test_submission7$followers <- round(Test_submission7$followers)
+Followers_submisson_M7 <- Test_submission7 %>% select(ID, followers)  
+
+Test_submission8 <- Test8 %>% select(gvkey, date, followers, ID)
+Test_submission8 <- rbind(Test_submission8, Test_6)
+Test_submission8 <- Test_submission8 %>% filter(date>=20170701)
+Test_submission8$followers <- round(Test_submission8$followers)
+Followers_submisson_M8 <- Test_submission8 %>% select(ID, followers) 
+
+Test_submission9 <- Test9 %>% select(gvkey, date, followers, ID)
+Test_submission9 <- rbind(Test_submission9, Test_6)
+Test_submission9 <- Test_submission9 %>% filter(date>=20170701)
+Test_submission9$followers <- round(Test_submission9$followers)
+Followers_submisson_M9 <- Test_submission9 %>% select(ID, followers)  
+
+Test_submission10 <- Test10 %>% select(gvkey, date, followers, ID)
+Test_submission10 <- rbind(Test_submission10, Test_6)
+Test_submission10 <- Test_submission10 %>% filter(date>=20170701)
+Test_submission10$followers <- round(Test_submission10$followers)
+Followers_submisson_M10 <- Test_submission10 %>% select(ID, followers)  
+
+Test_submission11 <- Test11 %>% select(gvkey, date, followers, ID)
+Test_submission11 <- rbind(Test_submission11, Test_6)
+Test_submission11 <- Test_submission11 %>% filter(date>=20170701)
+Test_submission11$followers <- round(Test_submission11$followers)
+Followers_submisson_M11 <- Test_submission11 %>% select(ID, followers)  
+
+Test_submission12 <- Test12 %>% select(gvkey, date, followers, ID)
+Test_submission12 <- rbind(Test_submission12, Test_6)
+Test_submission12 <- Test_submission12 %>% filter(date>=20170701)
+Test_submission12$followers <- round(Test_submission12$followers)
+Followers_submisson_M12 <- Test_submission12 %>% select(ID, followers)  
+
+# save the sample of submission
+write.csv(Followers_submisson_M1, "submission_M1.csv", row.names = FALSE)
+write.csv(Followers_submisson_M2, "submission_M2.csv", row.names = FALSE)
+write.csv(Followers_submisson_M3, "submission_M3.csv", row.names = FALSE)
+write.csv(Followers_submisson_M4, "submission_M4.csv", row.names = FALSE)
+write.csv(Followers_submisson_M5, "submission_M5.csv", row.names = FALSE)
+write.csv(Followers_submisson_M6, "submission_M6.csv", row.names = FALSE)
+write.csv(Followers_submisson_M7, "submission_M7.csv", row.names = FALSE)
+write.csv(Followers_submisson_M8, "submission_M8.csv", row.names = FALSE)
+write.csv(Followers_submisson_M9, "submission_M9.csv", row.names = FALSE)
+write.csv(Followers_submisson_M10, "submission_M10.csv", row.names = FALSE)
+write.csv(Followers_submisson_M11, "submission_M11.csv", row.names = FALSE)
+write.csv(Followers_submisson_M12, "submission_M12.csv", row.names = FALSE)
+```
+
+### 5.2 Out of Sample Evaluation
+
+The submission CSV files for the 12 models have been exported, and the analysis indicates that Model 1 and Model 3_1 have the most favorable outcome among them.
+
+![](financial1.png)
+
+![](financial2.png)
+
+## 6. Non-financial Model
+
+### 6.1 Non-financial Model Construction
+
+In this section, we build a model using non-financial data exclusively. Based on the multicollinearity test conducted in section 4.5 of EDA, days_joined, months_joined and years_joined are analysed as highly correlated.Thus, we only retain days_joined variable in the construction of our non financial variables model as the days_joined variable has greater variability in terms of data compared to the other two.
+
+Hence, the 3 non-financial models constructed are as follows:
+
+Model13: Growth_rate = Profile vars + announcements vars + popular ind + week dummy + ln(asset) Model14: Growth_rate = Profile vars + announcements vars + popular ind + week dummy + ln(asset) + industry FE Model15: Growth_rate = Profile vars + announcements vars + popular ind + week dummy + ln(asset) + industry FE + firm FE
+
+The above mentioned 3 non financial OLS regression models uses the same set of dependent and independent variables. The difference between the models are on the fixed effect levels applied. We added industry level fixed effect in model14 and we added industry and firm level fixed effect in model15. The fixed effects allows for control on the industry and firm level varying features. The formula for the model (**`Mod13_formula`**) is specified to capture the relationship between the growth rate and the non financial variables. Specifically, the formula encompasses profile_info, announcements related data, alongside dummies for each day of the week, and log "atq" as a measure of company size.
+
+```{r, eval=TRUE}
+
+# create formula
+Mod13_formula <- as.formula("growth_rate ~ is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined +
+pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+
+# run regression Model13 : non financial variables
+Model13 <- lm(Mod13_formula,data=Train)
+summary(Model13)
+
+# run regression Model14 : non financial variables with industry FE
+Mod14_formula <- update(Mod13_formula, . ~ . + factor(sic))
+Model14 <- lm(Mod14_formula,data=Train)
+summary(Model14)
+
+# run regression Model15 : non financial variables with industry FE and firm FE
+Mod15_formula <- update(Mod13_formula, . ~ . + factor(gvkey) + factor(sic))
+Model15 <- lm(Mod15_formula,data=Train)
+summary(Model15)
+```
+
+### 6.2 In Sample Evaluation
+
+The growth rates are predicted using 3 different models (Model1 through Model3) and stored in separate variables (**`Train$Pre_rate_1`** through **`Train$Pre_rate_3`**) within the **`Train`** dataset. These predicted growth rates are then used to estimate the followers for each model, considering the lagged followers and the predicted growth rates. The root mean square error (RMSE) function (**`rmse()`**) calculates the accuracy of each model by comparing the actual followers with the predicted followers, offering an in-sample accuracy assessment. Finally, the RMSE values for each model are computed.
+
+```{r, eval=TRUE}
+
+# predict Train followers growth rate
+Train$Pre_rate_13 <- predict(Model13, Train)
+Train$Pre_rate_14 <- predict(Model14, Train)
+Train$Pre_rate_15 <- predict(Model15, Train)
+
+# compute Train followers using predicted growth rate
+Train$Followers_M13 <- (1+Train$Pre_rate_13)*Train$followers_lag
+Train$Followers_M14 <- (1+Train$Pre_rate_14)*Train$followers_lag
+Train$Followers_M15 <- (1+Train$Pre_rate_15)*Train$followers_lag
+
+
+## compute In Sample accuracy
+rmse <- function(v1, v2) {
+  sqrt(mean((v1 - v2)^2, na.rm = T))
+}
+
+rmse <- c(rmse(Train$followers,Train$Followers_M13),
+          rmse(Train$followers,Train$Followers_M14),
+          rmse(Train$followers,Train$Followers_M15))
+
+# retrieve RMSE for all the five models
+names(rmse) <- c("Model13", "Model14", "Model15")
+rmse
+
+```
+
+### 6.3 Prediction of Test Followers
+
+Using the same calculation procedures in financial model part, we retrieve the last day's number of followers from the training data for each company (**`gvkey`**). It sorts the data by **`gvkey`** and date in descending order to obtain the latest date's followers. Afterward, it filters out specific **`gvkey`** values.
+
+Subsequently, it joins the last day's followers with the testing data using a full join based on **`gvkey`** and **`date`**. This ensures that each company's last day followers from the training data are paired with corresponding rows in the testing data.
+
+Then, it predicts growth rates for the testing data using Model1 (**`Model1`**). If there are missing values in the **`followers`** column of the testing data, the code iteratively calculates the followers using the growth rate and the lagged followers value until there are no missing values left. This ensures that missing follower values are filled in based on the predicted growth rate.
+
+```{r, eval=TRUE}
+
+# use the function for 3 non financial predicted rates
+Test13 <- predict_test(last_day_followers, Test, Model13)
+Test14 <- predict_test(last_day_followers, Test, Model14)
+Test15 <- predict_test(last_day_followers, Test, Model15)
+
+```
+
+We merge the six specific companies with the rest of the dataset. The merged data should have 6403 observations, which aligns with the format of submission sample. The follower counts are rounded to ensure integer values. From the resulting dataset, only the columns for ID and followers are selected, representing the necessary data for submission. This subset of data is saved as a CSV file named "submission_M1_fin.csv", excluding row numbers.
+
+```{r, eval=TRUE}
+
+# merge the six companies with other companies 6492
+Test_submission13 <- Test13 %>% select(gvkey, date, followers, ID)
+Test_submission13 <- rbind(Test_submission13, Test_6)
+
+# final submission data should return 6403 observations
+Test_submission13 <- Test_submission13 %>% filter(date>=20170701)
+Test_submission13$followers <- round(Test_submission13$followers)
+Followers_submisson_M13 <- Test_submission13 %>% select(ID, followers) 
+
+# merge the six companies with other companies 6492
+Test_submission14 <- Test14 %>% select(gvkey, date, followers, ID)
+Test_submission14 <- rbind(Test_submission14, Test_6)
+
+# final submission data should return 6403 observations
+Test_submission14 <- Test_submission14 %>% filter(date>=20170701)
+Test_submission14$followers <- round(Test_submission14$followers)
+Followers_submisson_M14 <- Test_submission14 %>% select(ID, followers) 
+
+# merge the six companies with other companies 6492
+Test_submission15 <- Test15 %>% select(gvkey, date, followers, ID)
+Test_submission15 <- rbind(Test_submission15, Test_6)
+
+# final submission data should return 6403 observations
+Test_submission15 <- Test_submission15 %>% filter(date>=20170701)
+Test_submission15$followers <- round(Test_submission15$followers)
+Followers_submisson_M15 <- Test_submission15 %>% select(ID, followers) 
+
+# save the sample of submission
+write.csv(Followers_submisson_M13, "submission_M13.csv", row.names = FALSE)
+write.csv(Followers_submisson_M14, "submission_M14.csv", row.names = FALSE)
+write.csv(Followers_submisson_M15, "submission_M15.csv", row.names = FALSE)
+
+```
+
+### 6.4 Out of Sample Evaluation
+
+The submission CSV files for the 3 models have been exported, and we still find that model 13 for the non-financial model gives better score. This is the model that gives us the best result for now, which makes us rank 3*rd* on the leaderboard temporarily.
+
+![](non-financial_model.png)
+
+## 7. Combined Model
+
+### 7.1 Combined Model Construction
+
+In this section, we combined all variables (stock price, financial ratios, announcement and profile variables) to construct a regression model for prediction of Twitter followers growth rate.
+
+The 5 combined model constructed are as follows:
+
+combined_Model1 : The response variable "growth_rate" is regressed against various financial ratios, stock price, announcements, and profile variables. The log-transformed value of `atq` is included as a variable to account for varying company size.
+
+combined_Model2 : The response variable "growth_rate" is regressed against the lagged values of financial ratios and stock price variables. The model aims to predict `growth_rate` based on the previous period's values of these variables, along with the announcement and profile variables.
+
+combined_Model3 : The removal of variables with potentially high multicollinearity is performed in this model. Specifically, `opmad`, `npm`, `quick_ratio`, `cash_ratio`, `ps`, `ptb`, and `roce` have been excluded from the formula. The removal of highly correlated variables is done with the expectation to reduce error term in the model thus improving accuracy.
+
+combined_Model4 : Industry and firm fixed effects are added to combined_Model1
+
+combined_Model5 : Industry and firm fixed effects are added to combined_Model2
+
+```{r, eval=TRUE}
+#create formula
+
+#combined_Mod1 : financial ratios, stock price , announcement, profile variables combined
+Mod16_formula<- as.formula("growth_rate ~ p_daily_change + volatile + p_daily_change_lag + volatile_lag + bm + pe_exi + ps + pcf + dpr + npm + opmbd + opmad + gpm + roa + roe + roce + debt_at + de_ratio + intcov + cash_ratio + quick_ratio + curr_ratio + inv_turn + at_turn + debt_assets + ptb + rect_turn + sale_nwc + divyield + is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+
+#combined_Mod2 : financial ratios (lag), stock price (lag), announcement, profile variables combined
+Mod17_formula <- as.formula("growth_rate ~ bm_lag + pe_exi_lag + ps_lag + pcf_lag + dpr_lag + npm_lag + opmbd_lag + opmad_lag + gpm_lag + roa_lag +roe_lag + roce_lag + debt_at_lag + de_ratio_lag + intcov_lag + cash_ratio_lag + quick_ratio_lag + curr_ratio_lag + inv_turn_lag + at_turn_lag + debt_assets_lag + ptb_lag + rect_turn_lag + sale_nwc_lag + divyield_lag + p_daily_change_lag + volatile_lag + is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+
+#combined_Mod3 : remove variables with high multicollinearity (remove opmad,npm,quick ratio,cash ratio,ps,ptb,roce)
+Mod18_formula <- as.formula("growth_rate ~ p_daily_change + volatile + p_daily_change_lag + volatile_lag + bm + pe_exi + pcf + dpr + opmbd + gpm + roa + roe + debt_at + de_ratio + intcov + curr_ratio + inv_turn + at_turn + debt_assets + rect_turn + sale_nwc + divyield + is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)")
+
+```
+
+Using the above model formulaes created, run regression for the 5 combined model stated.
+
+```{r, eval=TRUE}
+
+#run regression for combined_Mod1 
+Model16 <- lm(Mod16_formula, data = Train)
+summary(Model16)
+
+#run regression for combined_Mod2
+Model17 <- lm(Mod17_formula, data = Train)
+summary(Model17)
+
+#run regression for combined_Mod3
+Model18 <- lm(Mod18_formula, data = Train)
+summary(Model18)
+
+#run combined_Mod1 + industry FE + firm FE
+Mod19_formula <- update(Mod17_formula, .~. + factor(gvkey) + factor(sic))
+Model19 <- lm(Mod19_formula, data = Train)
+summary(Model19)
+
+#run combined_Mod2 + industry FE + firm FE
+Mod20_formula <- update(Mod18_formula, .~. + factor(gvkey) + factor(sic))
+Model20 <- lm(Mod20_formula, data = Train)
+summary(Model20)
+```
+
+### 7.2 In Sample Evaluation
+
+We then predict the growth rate and the number of followers using the fitted linear regression models (`combined_Mod1` to `combined_Mod5`). It then computes and prints the root mean squared error (RMSE) between the actual and predicted followers for each model, which can be used to evaluate the in-sample predictive accuracy of the models.
+
+```{r, eval=TRUE}
+#predict growth rate using Training data
+Train$Pre_rate_16 <- predict(Model16, Train)
+Train$Pre_rate_17 <- predict(Model17, Train)
+Train$Pre_rate_18 <- predict(Model18, Train)
+Train$Pre_rate_19 <- predict(Model19, Train)
+Train$Pre_rate_20 <- predict(Model20, Train)
+
+#compute predicted followers using predicted growth rate
+Train$Followers_M16 <- (1+Train$Pre_rate_16)*Train$followers_lag
+Train$Followers_M17 <- (1+Train$Pre_rate_17)*Train$followers_lag
+Train$Followers_M18 <- (1+Train$Pre_rate_18)*Train$followers_lag
+Train$Followers_M19 <- (1+Train$Pre_rate_19)*Train$followers_lag
+Train$Followers_M20 <- (1+Train$Pre_rate_20)*Train$followers_lag
+
+#rmse formulae
+rmse <- function(v1, v2) {
+  sqrt(mean((v1 - v2)^2, na.rm = T))
+}
+
+#compute rmse to check in sample accuracy
+rmse <- c(rmse(Train$followers,Train$Followers_M16),
+          rmse(Train$followers,Train$Followers_M17),
+          rmse(Train$followers,Train$Followers_M18),
+          rmse(Train$followers,Train$Followers_M19),
+          rmse(Train$followers,Train$Followers_M20))
+
+#list down the rmse for all 5 combined models
+names(rmse) <- c("Model16", "Model17", "Model18", "Model19", "Model20")
+rmse
+```
+
+### 7.3 Prediction of Test Followers
+
+We obtain the last day's number of followers from the training data and merges it with the test data. Then we predict the growth rate for the test data using the `combined_Mod5` model, and fills in any missing values in the `followers` column of the test data using the predicted growth rate and the lagged values of `followers`.
+
+```{r, eval=TRUE}
+
+Test16 <- predict_test(last_day_followers, Test, Model16)
+Test17 <- predict_test(last_day_followers, Test, Model17)
+Test18 <- predict_test(last_day_followers, Test, Model18)
+Test19 <- predict_test(last_day_followers, Test, Model19)
+Test20 <- predict_test(last_day_followers, Test, Model20)
+
+```
+
+We merge the original **`Test`** dataset with the derived **`Test_6`** dataset containing calculated follower counts for the specified companies.
+
+Following the merge, the dataset is filtered to retain only observations from 1 July 2017 onwards. Subsequently, we round follower counts and create a subset of the dataset containing only the **`ID`** and **`followers`** columns.
+
+Finally, we saved it as "submission_MXX.csv". XX denotes the submission for a particular model, for e.g. the submission for Model5 out of sample prediction will be saved as "submission_M5.csv"
+
+```{r, eval=TRUE}
+
+# merge the six companies with other companies 6492
+Test_submission16 <- Test16 %>% select(gvkey, date, followers, ID)
+Test_submission16 <- rbind(Test_submission16, Test_6)
+Test_submission16 <- Test_submission16 %>% filter(date>=20170701)
+Test_submission16$followers <- round(Test_submission16$followers)
+Followers_submisson_M16 <- Test_submission16 %>% select(ID, followers)  
+
+# merge the six companies with other companies 6492
+Test_submission17 <- Test17 %>% select(gvkey, date, followers, ID)
+Test_submission17 <- rbind(Test_submission17, Test_6)
+Test_submission17 <- Test_submission17 %>% filter(date>=20170701)
+Test_submission17$followers <- round(Test_submission17$followers)
+Followers_submisson_M17 <- Test_submission17 %>% select(ID, followers)  
+
+# merge the six companies with other companies 6492
+Test_submission18 <- Test18 %>% select(gvkey, date, followers, ID)
+Test_submission18 <- rbind(Test_submission18, Test_6)
+Test_submission18 <- Test_submission18 %>% filter(date>=20170701)
+Test_submission18$followers <- round(Test_submission18$followers)
+Followers_submisson_M18 <- Test_submission18 %>% select(ID, followers)  
+
+# merge the six companies with other companies 6492
+Test_submission19 <- Test19 %>% select(gvkey, date, followers, ID)
+Test_submission19 <- rbind(Test_submission19, Test_6)
+Test_submission19 <- Test_submission19 %>% filter(date>=20170701)
+Test_submission19$followers <- round(Test_submission19$followers)
+Followers_submisson_M19 <- Test_submission19 %>% select(ID, followers)  
+
+# merge the six companies with other companies 6492
+Test_submission20 <- Test20 %>% select(gvkey, date, followers, ID)
+Test_submission20 <- rbind(Test_submission20, Test_6)
+Test_submission20 <- Test_submission20 %>% filter(date>=20170701)
+Test_submission20$followers <- round(Test_submission20$followers)
+Followers_submisson_M20 <- Test_submission20 %>% select(ID, followers)  
+
+# save the sample of submission
+write.csv(Followers_submisson_M16, "submission_M16.csv", row.names = FALSE)
+write.csv(Followers_submisson_M17, "submission_M17.csv", row.names = FALSE)
+write.csv(Followers_submisson_M18, "submission_M18.csv", row.names = FALSE)
+write.csv(Followers_submisson_M19, "submission_M19.csv", row.names = FALSE)
+write.csv(Followers_submisson_M20, "submission_M20.csv", row.names = FALSE)
+```
+
+### 7.4 Out of Sample Evaluation
+
+Results for combined_model
+
+![](combined_model.png)
+
+## 8. LASSO
+
+### 8.1 Model Selection for LASSO, XGBoost and Random Forest
+
+The model we have selected for performing LASSO (regularisation), XGBoost and Random Forest (Ensembling) is as follows:
+
+1.  ML_Mod21 : stock price and financial ratios model
+2.  ML_Mod22 : stock price (lag), financial ratios (lag) model
+3.  ML_Mod23 : announcement and profile variables model
+4.  ML_Mod24 : financial ratios, stock price , announcement, profile variables combined
+5.  ML_Mod25 : financial ratios (lag), stock price (lag), announcement, profile variables combined
+
+```{r, eval=TRUE}
+
+#-------------------mutate log(at),factor(gvkey),factor(sic)-------------------------------#
+
+#mutate log(at) into Train dataset
+Train <- Train %>% mutate (log_atq = log(atq), factor_gvkey = factor(gvkey), factor_sic = factor(sic))
+
+#mutate log(at) into Test dataset
+Test <- Test %>% mutate (log_atq = log(atq), factor_gvkey = factor(gvkey), factor_sic = factor(sic))
+
+#------------------create formula for LASSO, XGBoost and Random Forest---------------------------#
+
+#ML_Mod21 : stock price and financial ratios model
+ML_Mod21_formula <- as.formula("growth_rate ~ bm + pe_exi + ps + pcf + dpr + npm + opmbd + opmad + gpm + roa + roe + roce + debt_at + de_ratio + intcov + cash_ratio + quick_ratio + curr_ratio + inv_turn + at_turn + rect_turn + sale_nwc + divyield + p_daily_change + volatile + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log_atq")
+
+#ML_Mod22 : stock price (lag), financial ratios (lag) model
+ML_Mod22_formula <- as.formula("growth_rate~bm_lag + pe_exi_lag + ps_lag + pcf_lag + dpr_lag + npm_lag + opmbd_lag + opmad_lag + gpm_lag + roa_lag +roe_lag + roce_lag + debt_at_lag + de_ratio_lag + intcov_lag + cash_ratio_lag + quick_ratio_lag + curr_ratio_lag + inv_turn_lag + at_turn_lag + rect_turn_lag + sale_nwc_lag + divyield_lag + p_daily_change_lag + volatile_lag+pop_ind + is_mon+is_tue + is_wed+is_thu + is_fri+is_sat + log_atq")
+
+#ML_Mod23 : profile variables model
+ML_Mod23_formula<- as.formula("growth_rate ~ is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log_atq")
+
+#ML_Mod24 : financial ratios, stock price , announcement, profile variables combined
+ML_Mod24_formula <- as.formula("growth_rate ~ p_daily_change + volatile + p_daily_change_lag + volatile_lag + bm + pe_exi + ps + pcf + dpr + npm + opmbd + opmad + gpm + roa + roe + roce + debt_at + de_ratio + intcov + cash_ratio + quick_ratio + curr_ratio + inv_turn + at_turn + debt_assets + 
+ptb + rect_turn + sale_nwc + divyield + is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count +  has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log_atq")
+
+#ML_Mod25 : financial ratios (lag), stock price (lag), announcement, profile variables combined
+ML_Mod25_formula <- as.formula("growth_rate ~ bm_lag + pe_exi_lag + ps_lag + pcf_lag + dpr_lag + npm_lag + opmbd_lag + opmad_lag + gpm_lag + roa_lag +roe_lag + roce_lag + debt_at_lag + de_ratio_lag + intcov_lag + cash_ratio_lag + quick_ratio_lag + curr_ratio_lag + inv_turn_lag + at_turn_lag + debt_assets_lag + ptb_lag + rect_turn_lag + sale_nwc_lag + divyield_lag + p_daily_change_lag + volatile_lag + is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log_atq")
+
+
+# create x-matrics for each model and y-dataframe as input variables for LASSO/XGBoost
+x21 <- model.matrix(ML_Mod21_formula, data = Train)[, -1] #remove y = growth rate
+x22 <- model.matrix(ML_Mod22_formula, data = Train)[, -1] #remove y = growth rate
+x23 <- model.matrix(ML_Mod23_formula, data = Train)[, -1] #remove y = growth rate
+x24 <- model.matrix(ML_Mod24_formula, data = Train)[, -1] #remove y = growth rate
+x25 <- model.matrix(ML_Mod25_formula, data = Train)[, -1] #remove y = growth rate
+
+y21 <- model.frame(ML_Mod21_formula, data = Train)[ , "growth_rate"]
+y22 <- model.frame(ML_Mod22_formula, data = Train)[ , "growth_rate"]
+y23 <- model.frame(ML_Mod23_formula, data = Train)[ , "growth_rate"]
+y24 <- model.frame(ML_Mod24_formula, data = Train)[ , "growth_rate"]
+y25 <- model.frame(ML_Mod25_formula, data = Train)[ , "growth_rate"]
+
+#create Twitter follower growth_rate column for Test data for xvals and yvals
+Test <- Test %>%
+  mutate(growth_rate = 0)
+
+# create matrices for testing data
+xvals21 <- model.matrix(ML_Mod21_formula, data = Test,  na.action = 'na.pass')[, -1]
+xvals22 <- model.matrix(ML_Mod22_formula, data = Test,  na.action = 'na.pass')[, -1]
+xvals23 <- model.matrix(ML_Mod23_formula, data = Test,  na.action = 'na.pass')[, -1]
+xvals24 <- model.matrix(ML_Mod24_formula, data = Test,  na.action = 'na.pass')[, -1]
+xvals25 <- model.matrix(ML_Mod25_formula, data = Test,  na.action = 'na.pass')[, -1]
+
+yvals21 <- model.frame(ML_Mod21_formula, data = Test)[ , "growth_rate"]
+yvals22 <- model.frame(ML_Mod22_formula, data = Test)[ , "growth_rate"]
+yvals23 <- model.frame(ML_Mod23_formula, data = Test)[ , "growth_rate"]
+yvals24 <- model.frame(ML_Mod24_formula, data = Test)[ , "growth_rate"]
+yvals25 <- model.frame(ML_Mod25_formula, data = Test)[ , "growth_rate"]
+
+```
+
+### 8.2 LASSO Feature Selection
+
+After selecting the 5 models, we employ the Least Absolute Shrinkage and Selection Operator (LASSO) technique to apply regularization. LASSO helps in eliminating less important features by shrinking their coefficients towards zero. This process aids in reducing the error terms within the regression model and prevents overfitting, thereby enhancing the accuracy of predictions.
+
+```{r}
+#--------------------- LASSO Regularisation method for feature selection--------------------#  
+
+# using LASSO for feature selection
+library(glmnet)
+  
+# run cross validation LASSO (regularisation) model 
+set.seed(2021)
+cvfit21 = cv.glmnet(x = x21, y = y21, family = "gaussian", alpha = 1, type.measure = "mse")
+cvfit22 = cv.glmnet(x = x22, y = y22, family = "gaussian", alpha = 1, type.measure = "mse")
+cvfit23 = cv.glmnet(x = x23, y = y23, family = "gaussian", alpha = 1, type.measure = "mse")
+cvfit24 = cv.glmnet(x = x24, y = y24, family = "gaussian", alpha = 1, type.measure = "mse")
+cvfit25 = cv.glmnet(x = x25, y = y25, family = "gaussian", alpha = 1, type.measure = "mse")
+
+# lambda for best performance model(min) and most regularised model(1se)
+cvfit21$lambda.min
+cvfit21$lambda.1se
+
+# plot cvfit graph  
+plot(cvfit21)
+plot(cvfit22)
+plot(cvfit23)
+plot(cvfit24)
+plot(cvfit25)
+```
+
+### 8.3 Lamda.min & Lamda.1SE
+
+Based on the cvfit plot for all 5 models, it is interesting to note that that the MSE did not change much even with the removal of features (shrinkage of coefficients) using LASSO. This means that the incremental explanatory power of each feature is minimal. In other words, the features used in our model has explanatory power on its own and when added together as a whole. However, it has no incremental added explanatory power if we were to consider feature by feature addition.
+
+Hence, LASSO lambda.1SE (most regularised) suggest the removal of all features for all 5 model, retaining only the y-intercept. LASSO lambda.1SE regularised technique seems to regard all features as unimportant if the features do not incrementally changes the MSE much.
+
+```{r}
+coefplot(cvfit23, lambda = 'lambda.min', sort = 'magnitude')
+coefplot(cvfit23, lambda = 'lambda.1se', sort = 'magnitude')
+```
+
+### 8.4 In Sample Evaluation
+
+Next we performed in sample cross validation prediction using lambda.min and lambda.1SE. We then compute the respective RMSE for the 5 model which regularisation is perform on.
+
+```{r}
+
+# predict using cvfit and lambda.min of the model (best performance model) 
+Train$LASSO_rate_M21 <- predict(cvfit21, x21, s = "lambda.min")
+Train$LASSO_rate_M22 <- predict(cvfit22, x22, s = "lambda.min")
+Train$LASSO_rate_M23 <- predict(cvfit23, x23, s = "lambda.min")
+Train$LASSO_rate_M24 <- predict(cvfit24, x24, s = "lambda.min")
+Train$LASSO_rate_M25 <- predict(cvfit25, x25, s = "lambda.min")
+
+# predict using cvfit and lambda.1se of the model (most regularised model)
+Train$LASSO_rate_SE21 <- predict(cvfit21, x21, s = "lambda.1se")
+Train$LASSO_rate_SE22 <- predict(cvfit22, x22, s = "lambda.1se")
+Train$LASSO_rate_SE23 <- predict(cvfit23, x23, s = "lambda.1se")
+Train$LASSO_rate_SE24 <- predict(cvfit24, x24, s = "lambda.1se")
+Train$LASSO_rate_SE25 <- predict(cvfit25, x25, s = "lambda.1se")
+
+# compute predicted followers predicted growth rate obtained from lamda.min (best performance model)
+Train$Follower_LA_M21 <- (1+Train$LASSO_rate_M21)*Train$followers_lag
+Train$Follower_LA_M22 <- (1+Train$LASSO_rate_M22)*Train$followers_lag
+Train$Follower_LA_M23 <- (1+Train$LASSO_rate_M23)*Train$followers_lag
+Train$Follower_LA_M24 <- (1+Train$LASSO_rate_M24)*Train$followers_lag
+Train$Follower_LA_M25 <- (1+Train$LASSO_rate_M25)*Train$followers_lag
+
+# compute predicted followers predicted growth rate obtained from lamda.1se (most regularised model)
+Train$Follower_LA_SE21 <- (1+Train$LASSO_rate_SE21)*Train$followers_lag
+Train$Follower_LA_SE22 <- (1+Train$LASSO_rate_SE22)*Train$followers_lag
+Train$Follower_LA_SE23 <- (1+Train$LASSO_rate_SE23)*Train$followers_lag
+Train$Follower_LA_SE24 <- (1+Train$LASSO_rate_SE24)*Train$followers_lag
+Train$Follower_LA_SE25 <- (1+Train$LASSO_rate_SE25)*Train$followers_lag
+
+# compute rmse to measure in sample accuracy
+rmse <- function(v1, v2) {
+  sqrt(mean((v1 - v2)^2, na.rm = T))
+}
+  
+RMSE <- c(rmse(Train$followers,Train$Follower_LA_M21),
+          rmse(Train$followers,Train$Follower_LA_M22),
+          rmse(Train$followers,Train$Follower_LA_M23),
+          rmse(Train$followers,Train$Follower_LA_M24),
+          rmse(Train$followers,Train$Follower_LA_M25),
+          rmse(Train$followers,Train$Follower_LA_SE21),
+          rmse(Train$followers,Train$Follower_LA_SE22),
+          rmse(Train$followers,Train$Follower_LA_SE23),
+          rmse(Train$followers,Train$Follower_LA_SE24),
+          rmse(Train$followers,Train$Follower_LA_SE25))
+  
+# obtain RMSE for all 6 models derived from best performance (lambda.min)
+names(RMSE) <- c("LASSO M21","LASSO M22","LASSO M23","LASSO M24","LASSO M25",
+                 "LASSO SE21","LASSO SE22", "LASSO SE23","LASSO SE24","LASSO SE25")
+RMSE
+```
+
+Based on the computed RMSE, it is evident that lamda.min returns a lower in sample RMSE (i.e. LASSO M21 - M25) while lamba.1SE returns a higher in sample RMSE. However, lamda.1SE results are not meaningful since it retains only the y-intercept for prediction and we will not use it for out of sample prediction.
+
+LASSO M24 (financial and non financial combined model) returns the prediction associated with the lowest in sample RMSE of 917.24. While LASSO M23 (non financial model) returns the prediction associated with the highest in sample RMSE of 984.2. Due to the bias and variance trade off, we will expect to see a more accurate out of sample prediction using LASSO M23 (non financial model)
+
+```{r}
+# coefficient for best performance model(min) 
+coef(cvfit24, s = "lambda.min")
+
+# coefficient for most regularised model(1se)
+coef(cvfit24, s = "lambda.1se")
+
+```
+
+### 8.5 Prediction of Test followers
+
+Based on our domain knowledge, it does not makes logical sense to predict Twitter followers growth using y-intercept only. Hence, in our case, lambda.1se is ineffective in aiding us perform feature selection. We will thus rely only on lambda.min to help us perform feature selection for our out of sample prediction. However, it is important to note that because lambda.min typically have a lower in sample bias, it will result in a higher out of sample variance (bias vs variance trade off).
+
+```{r}
+#----------------------- out of sample prediction--------------------------------------------------#
+
+# predict twitter growth rate using lambda min regularised model on Test data
+Test21 <- Test
+Test21$LASSO_rate_M21 <- predict(cvfit21, xvals21, s = "lambda.min")
+Test22 <- Test
+Test22$LASSO_rate_M22 <- predict(cvfit22, xvals22, s = "lambda.min")
+Test23 <- Test
+Test23$LASSO_rate_M23 <- predict(cvfit23, xvals23, s = "lambda.min")
+Test24 <- Test
+Test24$LASSO_rate_M24 <- predict(cvfit24, xvals24, s = "lambda.min")
+Test25 <- Test
+Test25$LASSO_rate_M25 <- predict(cvfit25, xvals25, s = "lambda.min")
+
+#merge Train data last day followers to Test data and create 6 Test sets for prediction
+Test21 <- full_join(last_day_followers, Test21, by = join_by(gvkey, date))
+Test21 <- Test21 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test22 <- full_join(last_day_followers, Test22, by = join_by(gvkey, date))
+Test22 <- Test22 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test23 <- full_join(last_day_followers, Test23, by = join_by(gvkey, date))
+Test23 <- Test23 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test24 <- full_join(last_day_followers, Test24, by = join_by(gvkey, date))
+Test24 <- Test24 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test25 <- full_join(last_day_followers, Test25, by = join_by(gvkey, date))
+Test25 <- Test25 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+
+while (any(is.na(Test21$followers))) {
+  Test21 <- Test21 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test21$LASSO_rate_M21), followers))
+}
+
+while (any(is.na(Test22$followers))) {
+  Test22 <- Test22 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test22$LASSO_rate_M22), followers))
+}
+
+while (any(is.na(Test23$followers))) {
+  Test23 <- Test23 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test23$LASSO_rate_M23), followers))
+}
+
+while (any(is.na(Test24$followers))) {
+  Test24 <- Test24 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test24$LASSO_rate_M24), followers))
+}
+
+while (any(is.na(Test25$followers))) {
+  Test25 <- Test25 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test25$LASSO_rate_M25), followers))
+}
+
+```
+
+We merge the six specific companies with the rest of the dataset. The merged data is filtered to include only records from 1 July 2017 onwards. The follower counts are rounded to ensure integer values. From the resulting dataset, only the columns for ID and followers are selected, representing the necessary data for submission. This subset of data is saved as a CSV file named "submission_M1_fin.csv", excluding row numbers.
+
+```{r}
+pacman::p_load(tidyverse)
+# merge the six companies with other companies
+Test_submission21 <- Test21 %>% select(gvkey, date, followers, ID)
+Test_submission21 <- rbind(Test_submission21, Test_6)
+Test_submission21 <- Test_submission21 %>% filter(date>=20170701)
+Test_submission21$followers <- round(Test_submission21$followers)
+Followers_submisson_M21 <- Test_submission21 %>% select(ID, followers)  
+
+Test_submission22 <- Test22 %>% select(gvkey, date, followers, ID)
+Test_submission22 <- rbind(Test_submission22, Test_6)
+Test_submission22 <- Test_submission22 %>% filter(date>=20170701)
+Test_submission22$followers <- round(Test_submission22$followers)
+Followers_submisson_M22 <- Test_submission22 %>% select(ID, followers)  
+
+Test_submission23 <- Test23 %>% select(gvkey, date, followers, ID)
+Test_submission23 <- rbind(Test_submission23, Test_6)
+Test_submission23 <- Test_submission23 %>% filter(date>=20170701)
+Test_submission23$followers <- round(Test_submission23$followers)
+Followers_submisson_M23 <- Test_submission23 %>% select(ID, followers)
+
+Test_submission24 <- Test24 %>% select(gvkey, date, followers, ID)
+Test_submission24 <- rbind(Test_submission24, Test_6)
+Test_submission24 <- Test_submission24 %>% filter(date>=20170701)
+Test_submission24$followers <- round(Test_submission24$followers)
+Followers_submisson_M24 <- Test_submission24 %>% select(ID, followers)  
+
+Test_submission25 <- Test25 %>% select(gvkey, date, followers, ID)
+Test_submission25 <- rbind(Test_submission25, Test_6)
+Test_submission25 <- Test_submission25 %>% filter(date>=20170701)
+Test_submission25$followers <- round(Test_submission25$followers)
+Followers_submisson_M25 <- Test_submission25 %>% select(ID, followers)  
+
+# save the sample of submission
+write.csv(Followers_submisson_M21, "submission_LAM21.csv", row.names = FALSE)
+write.csv(Followers_submisson_M22, "submission_LAM22.csv", row.names = FALSE)
+write.csv(Followers_submisson_M23, "submission_LAM23.csv", row.names = FALSE)
+write.csv(Followers_submisson_M24, "submission_LAM24.csv", row.names = FALSE)
+write.csv(Followers_submisson_M25, "submission_LAM25.csv", row.names = FALSE)
+
+```
+
+### 8.6 Out of Sample Evaluation
+
+results for the Lasso model using the min lambda are shown below. Feature selection by LASSO is not effective in improving our out of sample prediction due to the small incremental effect of our features on MSE. Domain knowledge model, on the other hand, uses all features and helps to retain explanatory power of each features when added as a whole. This in turn, make better out of sample prediction compared to LASSO regularised models.
+
+![](lasso.png)
+
+## 9. XGBoost
+
+### 9.1 Bayesian Optimisation Hyperparameter Tuning
+
+XGBoost comes with a wide range of hyperparameters that control various aspects of the algorithm's behavior, such as learning rate, tree depth and regularization. Tuning these hyperparameters allows us to optimize the model's performance by finding the combination that minimizes the loss function and maximizes the evaluation metric.Instead of manually tuning the parameters using a for loop, we adopted the use of Bayesian Optimisation to search for the best parameter values.
+
+Bayesian Optimization employs probabilistic models to efficiently evaluates different hyperparameter configurations,aiming to find the optimal set of hyperparameters in fewer iterations. This done so by first setting up a optimization function.
+
+The optimization function takes in the tuning parameters as input and return the best cross validation results (i/e. the lowest rmse score for this case). In the following code, we use the XGBoost data format function xgb.DMatrix() to prepare the data.
+
+We create 5 scoring function, each with the respective xgb.DMatrix created using the respective x and y of the 5 models (refer to section 8.1 of report) we have selected to enhance the prediction accuracy with boosting
+
+```{r}
+pacman::p_load(xgboost)
+pacman::p_load(ParBayesianOptimization)
+
+#hyperparameter tuning with bayesian optimisation
+
+#define an optimizing function
+scoring_function <- function(
+  eta, gamma, max_depth, min_child_weight, subsample, nfold) {
+  
+  dtrain <- xgb.DMatrix(x21, label = y21, missing = NA) #financial
+  # repeat the optimising function each time using only the respective x and y of selected model
+  # dtrain <- xgb.DMatrix(x22, label = y22, missing = NA) #financial(lag)
+  # dtrain <- xgb.DMatrix(x23, label = y23, missing = NA) #non financial
+  # dtrain <- xgb.DMatrix(x24, label = y24, missing = NA) #combined 
+  # dtrain <- xgb.DMatrix(x25, label = y25, missing = NA) #combined(lag)
+  
+  pars <- list(
+    eta = eta,
+    gamma = gamma,
+    max_depth = max_depth,
+    min_child_weight = min_child_weight,
+    subsample = subsample,
+    
+    booster = "gbtree", #can use gbtree or gblinear to compare which derive better results
+    objective = "reg:squarederror",
+    eval_metric = "rmse",
+    verbosity = 0
+  )
+  
+  xgbcv <- xgb.cv(
+    params = pars,
+    data = dtrain,
+    
+    nfold = nfold,
+    
+    nrounds = 100,
+    prediction = TRUE,
+    showsd = TRUE,
+    early_stopping_rounds = 10,
+    maximize = FALSE,
+    stratified = TRUE
+  )
+
+  # required by the package, the output must be a list
+  # with at least one element of "Score", the measure to optimize
+  # Score must start with capital S
+  # For this case, we also report the best num of iteration
+  return(
+    list(
+      Score = min(xgbcv$evaluation_log$test_rmse_mean),
+      nrounds = xgbcv$best_iteration
+    )
+  )
+}
+```
+
+### 9.2 Boundary values and BayesOpt()
+
+Then, we went on to define the boundary of values for each tuning parameter. Note that we specify integer if the parameter takes in integer values only, particularly for max_depth and nfold.
+
+```{r}
+
+#start the optimization process
+  
+#define the lower and upper bounds for each function (FUN) input
+bounds <- list(
+  eta = c(0, 1),
+  gamma =c(0, 100),
+  max_depth = c(2L, 10L), # L means integers
+  min_child_weight = c(1, 25),
+  subsample = c(0.25, 1),
+  nfold = c(3L, 10L)
+)
+```
+
+The optimization process is then performed by the bayesOpt() function which will maximize the optimization function using Bayesian optimization.
+
+```         
+1. FUN : scoring function for optimisation
+2. bounds : boundary values for all parameters
+3. initPoints : initialized the optimization process by running FUN number of times, the value          must be more than the number of FUN inputs (for this case, FUN has 6 inputs, so this value should be at least 7)
+4. iters.n : times FUN to run after initialization to search for global optimal solutions. It is to update prior belief and form posterior belief.
+```
+
+We also use system.time() to record the time consumed by running the function.
+
+```{r}
+
+#record time consumed for running the function
+set.seed(2021)
+
+time_noparallel <- system.time(
+  opt_obj <- bayesOpt(
+    FUN = scoring_function,
+    bounds = bounds,
+    initPoints = 7,
+    iters.n = 5,
+  ))
+```
+
+### 9.3 XGBoost Score Summary
+
+We then examine the output of the optimisation process to obtain the optimised values for the 6 parameters for tuning. In this case, most optimised set of parameters corresponds with the 9th iteration which returns the lowest Score (Score = min(xgbcv$evaluation_log$test_rmse_mean)).
+
+1.  eta (learning rate): 1
+2.  gamma : 0
+3.  max_depth : 6
+4.  min_child_weight : 25,
+5.  subsample : 1
+6.  nfold : 3
+
+It is worthy to note that getBestPars function did not return the parameters that corresponds to the lowest MSE Score. This is even so after we amended FUN Scoring function to OLS regression Score function with maximise set as FALSE. We have tried using the getBestPars output set of parameters to do out of sample prediction and it did not perform as well as the set of parameters outline in 1- 6 above.
+
+Hence, we will manually input the 1-6 parameters above as the optimised parameter for training the XGBoost models. The trained models will then create predictions with the lowest RMSE within the boundaries we have set for our parameters
+
+```{r}
+
+#examine the output summary
+#again, have to use capital letters required by the package
+opt_obj$scoreSummary
+
+#obtain the optimised values for the 6 parameters we want to tune
+#the built-in function output the FUN input arguments only.
+getBestPars(opt_obj)
+```
+
+```{r}
+#take the optimized values for the six parameters and train the XGBoost model 
+#take the optimal parameters for xgboost()
+params <- list(eta = 1,
+               gamma = 0,
+               max_depth = 6,
+               min_child_weight = 25,
+               subsample = 1,
+               nfold = 3,
+               objective = "reg:squarederror")
+
+#the numrounds which gives the min RMSE score
+numrounds <- opt_obj$scoreSummary$nrounds[
+  which(opt_obj$scoreSummary$Score
+        == min(opt_obj$scoreSummary$Score))]
+
+fit_tuned26 <- xgboost(params = params,
+                     data = x21,
+                     label = y21,
+                     nrounds = numrounds,
+                     eval_metric = "rmse")
+
+fit_tuned27 <- xgboost(params = params,
+                     data = x22,
+                     label = y22,
+                     nrounds = numrounds,
+                     eval_metric = "rmse")
+
+fit_tuned28 <- xgboost(params = params,
+                     data = x23,
+                     label = y23,
+                     nrounds = numrounds,
+                     eval_metric = "rmse")
+
+fit_tuned29 <- xgboost(params = params,
+                     data = x24,
+                     label = y24,
+                     nrounds = numrounds,
+                     eval_metric = "rmse")
+
+fit_tuned30 <- xgboost(params = params,
+                     data = x25,
+                     label = y25,
+                     nrounds = numrounds,
+                     eval_metric = "rmse")
+```
+
+### 9.4 In Sample Accuracy
+
+We run the optimised parameters obtained from Bayesian Optimisation technique to train 5 models (see section 8.1 for models selected) using XGBoost. The predicted growth rate from Train data is then used to compute the actual no of Twitter followers in the respective dates.
+
+Based on the RMSE results computed, XG28 (Non financial model on XGBoost) performs the best in terms of in sample prediction with an in sample RMSE of 640.5. On the other hand, the model that performs the worse for in sample prediction is XG27 (Financial(lag), StockPrice(lag) model on XGBoost).
+
+```{r}
+# compute in sample predicted growth rate
+Train$XG_rate_26 <- predict(fit_tuned26, x21)
+Train$XG_rate_27 <- predict(fit_tuned27, x22)
+Train$XG_rate_28 <- predict(fit_tuned28, x23)
+Train$XG_rate_29 <- predict(fit_tuned29, x24)
+Train$XG_rate_30 <- predict(fit_tuned30, x25)
+
+# using in sample predicted growth rate, compute in sample predicted followers.
+Train$Followers_XG_26<- (1+Train$XG_rate_26)*Train$followers_lag
+Train$Followers_XG_27<- (1+Train$XG_rate_27)*Train$followers_lag
+Train$Followers_XG_28<- (1+Train$XG_rate_28)*Train$followers_lag
+Train$Followers_XG_29<- (1+Train$XG_rate_29)*Train$followers_lag
+Train$Followers_XG_30<- (1+Train$XG_rate_30)*Train$followers_lag
+
+# compute rmse to evaluate in sample prediction accuracy
+rmse <- function(v1, v2) {
+  sqrt(mean((v1 - v2)^2, na.rm = T))
+}
+
+RMSE <- c(rmse(Train$followers,Train$Followers_XG_26),
+          rmse(Train$followers,Train$Followers_XG_27),
+          rmse(Train$followers,Train$Followers_XG_28),
+          rmse(Train$followers,Train$Followers_XG_29),
+          rmse(Train$followers,Train$Followers_XG_30))
+
+## To get the RMSE for all the models
+names(RMSE) <- c("XG26", "XG27", "XG28", "XG29", "XG30")
+RMSE
+
+
+```
+
+### 9.5 Prediction of Test Followers
+
+```{r}
+
+#evaluation of the tuned model
+#prediction on test sample
+
+#merge the last day of followers in Train data to Test data
+Test26 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test26 <- Test26 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test27 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test27 <- Test27 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test28 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test28 <- Test28 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test29 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test29 <- Test29 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test30 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test30 <- Test30 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+pred.xgb.tuned26 <- predict(fit_tuned26, xvals21)
+pred.xgb.tuned27 <- predict(fit_tuned27, xvals22)
+pred.xgb.tuned28 <- predict(fit_tuned28, xvals23)
+pred.xgb.tuned29 <- predict(fit_tuned29, xvals24)
+pred.xgb.tuned30 <- predict(fit_tuned30, xvals25)
+print(pred.xgb.tuned27)
+
+suppressWarnings({
+while (any(is.na(Test26$followers))) {
+  Test26 <- Test26 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+pred.xgb.tuned26), followers))
+}
+while (any(is.na(Test27$followers))) {
+  Test27 <- Test27 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+pred.xgb.tuned27), followers))
+}
+while (any(is.na(Test28$followers))) {
+  Test28 <- Test28 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+pred.xgb.tuned28), followers))
+}
+while (any(is.na(Test29$followers))) {
+  Test29 <- Test29 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+pred.xgb.tuned29), followers))
+}
+while (any(is.na(Test30$followers))) {
+  Test30 <- Test30 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+pred.xgb.tuned30), followers))
+}
+})
+```
+
+```{r}
+pacman::p_load(tidyverse)
+# merge the six companies with other companies
+Test_submission26 <- Test26 %>% select(gvkey, date, followers, ID)
+Test_submission26 <- rbind(Test_submission26, Test_6)
+Test_submission26 <- Test_submission26 %>% filter(date>=20170701)
+Test_submission26$followers <- round(Test_submission26$followers)
+Followers_submisson_M26 <- Test_submission26 %>% select(ID, followers)  
+
+Test_submission27 <- Test27 %>% select(gvkey, date, followers, ID)
+Test_submission27 <- rbind(Test_submission27, Test_6)
+Test_submission27 <- Test_submission27 %>% filter(date>=20170701)
+Test_submission27$followers <- round(Test_submission27$followers)
+Followers_submisson_M27 <- Test_submission27 %>% select(ID, followers) 
+
+Test_submission28 <- Test28 %>% select(gvkey, date, followers, ID)
+Test_submission28 <- rbind(Test_submission28, Test_6)
+Test_submission28 <- Test_submission28 %>% filter(date>=20170701)
+Test_submission28$followers <- round(Test_submission28$followers)
+Followers_submisson_M28 <- Test_submission28 %>% select(ID, followers) 
+
+Test_submission29 <- Test29 %>% select(gvkey, date, followers, ID)
+Test_submission29 <- rbind(Test_submission29, Test_6)
+Test_submission29 <- Test_submission29 %>% filter(date>=20170701)
+Test_submission29$followers <- round(Test_submission29$followers)
+Followers_submisson_M29 <- Test_submission29 %>% select(ID, followers) 
+
+Test_submission30 <- Test30 %>% select(gvkey, date, followers, ID)
+Test_submission30 <- rbind(Test_submission30, Test_6)
+Test_submission30 <- Test_submission30 %>% filter(date>=20170701)
+Test_submission30$followers <- round(Test_submission30$followers)
+Followers_submisson_M30 <- Test_submission30 %>% select(ID, followers)
+
+# save the sample of submission
+write.csv(Followers_submisson_M26, "submission_XGM26.csv", row.names = FALSE)
+write.csv(Followers_submisson_M27, "submission_XGM27.csv", row.names = FALSE)
+write.csv(Followers_submisson_M28, "submission_XGM28.csv", row.names = FALSE)
+write.csv(Followers_submisson_M29, "submission_XGM29.csv", row.names = FALSE)
+write.csv(Followers_submisson_M30, "submission_XGM30.csv", row.names = FALSE)
+
+```
+
+### 9.6 Out of Sample Evaluation
+
+It is worthy to note that XGBoost models outperform our domain knowledge models in terms of out of sample prediction.
+
+![](xgboost.png)
+
+## 10. Random Forest
+
+### 10.1 Hyperparameter Tuning
+
+Random Forest is a powerful ensemble learning technique widely used for regression and classification tasks. The technique involves the building of decision trees on bootstrap dataset and running predictions on each tree before aggregating (or bagging) the results. This mitigate the overfitting issues faced by decision trees, thus reducing variance.
+
+Hyperparameter tuning is crucial for optimizing the performance of Random Forest models. various combinations of hyperparameters are tested to find the optimal configuration that yields the best model performance.
+
+We performed hyperparameter tuning for Random Forest using the tuneRF function from the randomForest package in R. Below is the brief explanation of the steps performed:
+
+1.  set.seed(2021) for reproducibility of results.
+2.  randomForest::tuneRF : Executes grid search with cross-validation using the tuneRF function, which\
+    automatically selects the optimal values for hyperparameters based on out-of-bag (OOB) error estimates.
+3.  Extract Optimal mtry Value: Identifies the optimal value for the mtry hyperparameter, which represents the number of variables randomly sampled as candidates at each split.
+4.  Run Random Forest Models with Optimal mtry: Train Random Forest models (rf_model31, rf_model32, ..., rf_model35) using the optimal mtry value obtained from the tuning process for different formulas (ML_Mod21_formula, ML_Mod22_formula, ..., ML_Mod25_formula). kindly refer to section 8.1 for the 5 models selected for running on advanced ML algorthims
+
+```{r, eval=TRUE}
+
+#---------Random Forest Hyperparameter Tuning and Ensembling Method ---------------------#
+set.seed(2021)
+#define hyperparameter grid for tuning
+hyperparameters <- list(
+  n_estimators = c(50, 100, 150),      #no of trees in the forest
+  max_depth = c(5, 10, 15),            #max depth of trees
+  min_samples_split = c(2, 5, 10),     #min samples required to split a node
+  min_samples_leaf = c(1, 2, 4),       #min samples required at each leaf node
+  max_features = c("sqrt", "log2"),    #no of features to consider at each split
+  bootstrap = c(TRUE, FALSE)           #whether to use bootstrap samples
+)
+
+#identify categorical variables
+categorical_vars <- sapply(Train, is.factor)
+print (categorical_vars)
+
+#exclude categorical variables from the dataset
+#randomforest cannot handle categorical predictors with >53 categories
+Train_numeric <- Train[, !categorical_vars]
+
+#perform grid search with cross-validation
+rf_grid <- randomForest::tuneRF(x = Train_numeric[, -which(names(Train_numeric) == "growth_rate")], 
+                                y = Train_numeric$growth_rate, 
+                                mtryStart = 2,
+                                ntreeTry = 100,
+                                stepFactor = 1.5,
+                                improve = 0.05,
+                                trace = TRUE,
+                                plot = TRUE)
+
+#extract the optimal mtry value
+optimal_mtry <- rf_grid[which.min(rf_grid)]
+
+#finally, rerun the randomForest() function with the updated mtry parameter
+rf_model31 <- randomForest(ML_Mod21_formula, 
+                         data = Train,
+                         mtry = optimal_mtry)
+
+rf_model32 <- randomForest(ML_Mod22_formula, 
+                         data = Train,
+                         mtry = optimal_mtry)
+
+rf_model33 <- randomForest(ML_Mod23_formula, 
+                         data = Train,
+                         mtry = optimal_mtry)
+
+rf_model34 <- randomForest(ML_Mod24_formula, 
+                         data = Train,
+                         mtry = optimal_mtry)
+
+rf_model35 <- randomForest(ML_Mod25_formula, 
+                         data = Train,
+                         mtry = optimal_mtry)
+```
+
+### 10.2 In Sample Evaluation
+
+Next, we use the trained Random forest model to make prediction on Twitter follower growth rate on Train data. The Twitter follower growth rate is then use to derive the predicted daily Twitter followers count.
+
+This allows us to perform evaluation on the prediction capabilities of these Random forest model in sample (i.e. on Train data). RF Model 31 (Financial Model) makes the best in sample prediction with the lowest RMSE of 748.0 while RF Model 33 (Non Financial Model) performs the worst in terms of in sample prediction with the highest RMSE of 927.0.
+
+```{r}
+
+#make predictions on growth_rate on Train data
+Train$RTpred_rate31 <- predict(rf_model31, Train)
+Train$RTpred_rate32 <- predict(rf_model32, Train)
+Train$RTpred_rate33 <- predict(rf_model33, Train)
+Train$RTpred_rate34 <- predict(rf_model34, Train)
+Train$RTpred_rate35 <- predict(rf_model35, Train)
+
+#create rmse function to measure in sample accuracy
+rmse <- function(v1, v2) {
+  sqrt(mean((v1 - v2)^2, na.rm = T))
+}
+
+#compute predicted followers using predicted growth rate obtained from random Tree forest
+Train$RTfollowers31 <- (1+Train$RTpred_rate31)*Train$followers_lag
+Train$RTfollowers32 <- (1+Train$RTpred_rate32)*Train$followers_lag
+Train$RTfollowers33 <- (1+Train$RTpred_rate33)*Train$followers_lag
+Train$RTfollowers34 <- (1+Train$RTpred_rate34)*Train$followers_lag
+Train$RTfollowers35 <- (1+Train$RTpred_rate35)*Train$followers_lag
+
+#evaluate the in sample performance (rmse) of the model
+RMSE <- c(rmse(Train$followers,Train$RTfollowers31),
+          rmse(Train$followers,Train$RTfollowers32),
+          rmse(Train$followers,Train$RTfollowers33),
+          rmse(Train$followers,Train$RTfollowers34),
+          rmse(Train$followers,Train$RTfollowers35))
+
+## To get the RMSE for all the models
+names(RMSE) <- c("RF31", "RF32", "RF33", "RF34", "RF35")
+RMSE
+         
+```
+
+### 10.3 Prediction of Test Followers
+
+To ensure that our Random Forest Model is accurate in prediction, we went on to run our Random Forest model on Test data to make out of sample prediction. Based on the out of sample prediction, RF Model 31 (Financial Model) performs the best followed by RF Model 34 (Combined Model).
+
+Random Forest succeeded in enhancing our domain knowledge model prediction capabilities. Random Forest ensembling techniques on random sampling and creation of random subsets of features and aggregation of each parallel trees is effective in increasing the prediction capabilities of model on smaller dataset. However, the boostraping and bagging techniques in Random Forest is not as powerful as the boosting techniques used in XGBoost on enhancing prediction accuracy of our model.
+
+```{r}
+#----------------- out of sample prediction----------------------------------------#
+library(dplyr)
+
+#make predictions on growth_rate on Test data
+Test31 <- Test
+Test31$RTpred_rate31 <- predict(rf_model31, Test31)
+Test32 <- Test
+Test32$RTpred_rate32 <- predict(rf_model32, Test32)
+Test33 <- Test
+Test33$RTpred_rate33 <- predict(rf_model33, Test33)
+Test34 <- Test
+Test34$RTpred_rate34 <- predict(rf_model34, Test34)
+Test35 <- Test
+Test35$RTpred_rate35 <- predict(rf_model35, Test35)
+
+
+#merge the last day of followers in Train data to Test data
+Test31 <- full_join(last_day_followers, Test31, by = join_by(gvkey, date))
+Test31 <- Test31 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test32 <- full_join(last_day_followers, Test32, by = join_by(gvkey, date))
+Test32 <- Test32 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test33 <- full_join(last_day_followers, Test33, by = join_by(gvkey, date))
+Test33 <- Test33 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test34 <- full_join(last_day_followers, Test34, by = join_by(gvkey, date))
+Test34 <- Test34 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test35 <- full_join(last_day_followers, Test35, by = join_by(gvkey, date))
+Test35 <- Test35 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+while (any(is.na(Test31$followers))) {
+  Test31 <- Test31 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test31$RTpred_rate31 ), followers))
+}
+while (any(is.na(Test32$followers))) {
+  Test32 <- Test32 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test32$RTpred_rate32 ), followers))
+}
+while (any(is.na(Test33$followers))) {
+  Test33 <- Test33 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test33$RTpred_rate33 ), followers))
+}
+while (any(is.na(Test34$followers))) {
+  Test34 <- Test34 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test34$RTpred_rate34 ), followers))
+}
+while (any(is.na(Test35$followers))) {
+  Test35 <- Test35 %>%
+    mutate(followers = ifelse(is.na(followers), lag(followers) * (1+Test35$RTpred_rate35 ), followers))
+}
+
+#-----------------------generate Kaggle submission file------------------------------# 
+
+# merge the six companies with other companies 6492
+Test31 <- Test31 %>% select(gvkey, date, followers, ID)
+Test31 <- rbind(Test31, Test_6)
+Test31 <- Test31 %>% filter(date>=20170701)
+Test31$followers <- round(Test31$followers)
+Followers_submisson_RF31 <- Test31 %>% select(ID, followers) 
+
+Test32 <- Test32 %>% select(gvkey, date, followers, ID)
+Test32 <- rbind(Test32, Test_6)
+Test32<- Test32 %>% filter(date>=20170701)
+Test32$followers <- round(Test32$followers)
+Followers_submisson_RF32 <- Test32 %>% select(ID, followers) 
+
+Test33 <- Test33 %>% select(gvkey, date, followers, ID)
+Test33 <- rbind(Test33, Test_6)
+Test33 <- Test33 %>% filter(date>=20170701)
+Test33$followers <- round(Test33$followers)
+Followers_submisson_RF33 <- Test33 %>% select(ID, followers) 
+
+Test34 <- Test34 %>% select(gvkey, date, followers, ID)
+Test34 <- rbind(Test34, Test_6)
+Test34 <- Test34 %>% filter(date>=20170701)
+Test34$followers <- round(Test34$followers)
+Followers_submisson_RF34 <- Test34 %>% select(ID, followers) 
+
+Test35 <- Test35 %>% select(gvkey, date, followers, ID)
+Test35 <- rbind(Test35, Test_6)
+Test35 <- Test35 %>% filter(date>=20170701)
+Test35$followers <- round(Test35$followers)
+Followers_submisson_RF35 <- Test35 %>% select(ID, followers) 
+
+# save the sample of submission
+write.csv(Followers_submisson_RF31, "submission_RF31.csv", row.names = FALSE)  
+write.csv(Followers_submisson_RF32, "submission_RF32.csv", row.names = FALSE)  
+write.csv(Followers_submisson_RF33, "submission_RF33.csv", row.names = FALSE)  
+write.csv(Followers_submisson_RF34, "submission_RF34.csv", row.names = FALSE)  
+write.csv(Followers_submisson_RF35, "submission_RF35.csv", row.names = FALSE)  
+```
+
+### 10.4 Out of Sample Evaluation
+
+![](random_forest.png)
+
+## 11. Ensemble
+
+After using LASSO, XGboost and Random Forest ensembling techniques, we proceed to use simple Ensemble methods (Ensemble by average and Ensemble by weighted average) to further improve our predictionn.. We choose financial model 3 and non-financial model 1 to try to obtain a better prediction result.
+
+We average the financial model 3 and non-financial model 1 test prediction as the predicted growth rate. The result shows that the RMSE of average predictions in train data is 918.2, which means the bias is not lowered too much. However, the Kaggle result shows that the Ensemble by average significantly improves the model and its rank is higher than non-financial model 3.
+
+The following is to give two models different weights to check how different weights will impact the predictions. Because the best non-financial model which is non-financial model 3 performs better than financial model 3, we make a hypothesis that giving more weights to non-financial model will get better result. We take 0.25 as a step to test the result, it turns out that a higher weights on non-financial model than on financial indeed will get a higher score and 0.25 weights on financial model and 0.75 non-financial model ranks the highest among all the weights.
+
+Next, we allocate more elaborate weights to each model from 0.1 to 0.9 by 0.1 to verify hypothesis. The best performance shows when financial model is given 0.4 weights and non-financial model is given 0.6 weights, and it exceeds 0.25 weight result.
+
+```{r}
+
+#-----------create Financial Model 3 and Non Financial Model1 formula--------------#
+
+Fin_Mod <- lm(growth_rate ~ bm + pe_exi + ps + pcf + dpr + npm + opmbd + opmad + gpm + roa + roe + roce + debt_at + de_ratio + intcov + cash_ratio + quick_ratio + curr_ratio + inv_turn + at_turn + debt_assets + ptb + rect_turn + sale_nwc + divyield + p_daily_change + volatile + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq)+factor(sic),data=Train)
+
+Non_Fin_Mod <- lm(growth_rate ~ is_annouce + red_annouce + no_annoucement + TFF + coleman_liau + flesch + fog_info + num_words + bio_complete + has_url + hashtags_count + has_hashtags + contains_company_name + contains_words + custom_content + days_joined + pop_ind + is_mon + is_tue + is_wed + is_thu + is_fri + is_sat + log(atq),data=Train)
+
+## Predict in Train data
+Train$pre_finaicl_mod3 <- predict(Fin_Mod, Train)
+Train$pre_non_fin_mod1 <- predict(Non_Fin_Mod,Train)
+
+## Get Average predicted growth rate
+Train$avr_pre <- (Train$pre_finaicl_mod3+Train$pre_non_fin_mod1)/2
+Train$wt_pre_0.25 <- (Train$pre_finaicl_mod3*0.25+Train$pre_non_fin_mod1*0.75)
+Train$wt_pre_0.4 <- (Train$pre_finaicl_mod3*0.4+Train$pre_non_fin_mod1*0.6)
+
+## Get predicted followers in Train
+Train$avr_followers <- (1+Train$avr_pre)*Train$followers_lag
+Train$wt_followers_0.25 <- (1+Train$wt_pre_0.25)*Train$followers_lag
+Train$wt_followers_0.4 <- (1+Train$wt_pre_0.4)*Train$followers_lag
+
+rmse <- function(v1, v2) {
+  sqrt(mean((v1 - v2)^2, na.rm = T))
+}
+
+RMSE <- c(rmse(Train$followers,Train$avr_followers),
+          rmse(Train$followers,Train$wt_followers_0.25),
+          rmse(Train$followers,Train$wt_followers_0.4))
+
+# retrieve RMSE for all the five models
+names(RMSE) <- c("Model36", "Model37", "Model38")
+RMSE
+
+
+#---------------------------Average & Weighted Ensemble----------------------------------------#
+
+#merge the last day of followers in Train data to Test data
+Test36 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test36 <- Test36 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test37 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test37 <- Test37 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+Test38 <- full_join(last_day_followers, Test, by = join_by(gvkey, date))
+Test38 <- Test38 %>% arrange(gvkey, date) %>%
+  select(-sic.x) %>%
+  rename(`sic` = sic.y) %>% 
+  select(-ID.x) %>%
+  rename(`ID` = ID.y)
+
+## Get predictions in Test
+Test36$Pre_finaicl_mod3 <- predict(Fin_Mod,Test36)
+Test36$Pre_non_fin_mod1 <- predict(Non_Fin_Mod, Test36)
+
+# use weighted average to make followers prediction
+Test37 <- Test36 %>% mutate(wt_pre=(Pre_finaicl_mod3 *0.25 +Pre_non_fin_mod1*0.75))
+Test38 <- Test36 %>% mutate(wt_pre=(Pre_finaicl_mod3 *0.4 +Pre_non_fin_mod1*0.6))
+
+## Use average method to make followers prediction
+Test36 <- Test36 %>% mutate(avr_pre=(Pre_finaicl_mod3+Pre_non_fin_mod1)/2)
+
+while (any(is.na(Test36$followers))) {
+  Test36 <- Test36 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+Test36$avr_pre), followers))
+}
+while (any(is.na(Test37$followers))) {
+  Test37 <- Test37 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+Test37$wt_pre), followers))
+}
+while (any(is.na(Test38$followers))) {
+  Test38 <- Test38 %>%
+    mutate(followers= ifelse(is.na(followers), lag(followers) * (1+Test38$wt_pre), followers))
+}
+
+```
+
+```{r}
+#merge the six companies with other companies 6492
+Test36 <- Test36 %>% select(gvkey, date, followers, ID)
+Test36 <- rbind(Test36, Test_6)
+Test36 <- Test36 %>% filter(date>=20170701)
+Test36$followers <- round(Test36$followers)
+Followers_submisson_Ensembles36 <- Test36 %>% select(ID, followers)
+
+Test37 <- Test37 %>% select(gvkey, date, followers, ID)
+Test37 <- rbind(Test37, Test_6)
+Test37 <- Test37 %>% filter(date>=20170701)
+Test37$followers <- round(Test37$followers)
+Followers_submisson_Ensembles37 <- Test37 %>% select(ID, followers)
+
+Test38 <- Test38 %>% select(gvkey, date, followers, ID)
+Test38 <- rbind(Test38, Test_6)
+Test38 <- Test38 %>% filter(date>=20170701)
+Test38$followers <- round(Test38$followers)
+Followers_submisson_Ensembles38 <- Test38 %>% select(ID, followers)
+
+
+#save the sample of submission
+write.csv(Followers_submisson_Ensembles36, "submission_Ensembles36.csv", row.names = FALSE)  
+write.csv(Followers_submisson_Ensembles37, "submission_Ensembles37.csv", row.names = FALSE)  
+write.csv(Followers_submisson_Ensembles38, "submission_Ensembles38.csv", row.names = FALSE) 
+```
+
+out of sample result for ensemble models
+
+![](ensemble.png)
+
+## 10. Score Summary
+
+There is bias and variance trade-off in model selections. From our analysis results, the best performing model in train which means low bias is not corresponding to the best out of sample which will give a high variance. We have to choose models we want depending on different goals.
+
+```{r}
+Model_name <- c("Model1", "Model2", "Model3", "Model4", "Model5", "Model6", "Model7", "Model8",
+                "Model9", "Model10", "Model11", "Model12", "Model13", "Model14", "Model15", "Model16",
+                "Model17", "Model18", "Model19", "Model20", "Model21", "Model22", "Model23", "Model24",
+                "Model25", "Model26", "Model27", "Model28", "Model29", "Model30", "Model31", "Model32",
+                "Model33", "Model34", "Model35", "Model36", "Model37", "Model38")
+rmse_value <- c(rmse(Train$followers,Train$Followers_M1),
+                rmse(Train$followers,Train$Followers_M2),
+                rmse(Train$followers,Train$Followers_M3),
+                rmse(Train$followers,Train$Followers_M4),
+                rmse(Train$followers,Train$Followers_M5),
+                rmse(Train$followers,Train$Followers_M6),
+                rmse(Train$followers,Train$Followers_M7),
+                rmse(Train$followers,Train$Followers_M8),
+                rmse(Train$followers,Train$Followers_M9),
+                rmse(Train$followers,Train$Followers_M10),
+                rmse(Train$followers,Train$Followers_M11),
+                rmse(Train$followers,Train$Followers_M12),
+                rmse(Train$followers,Train$Followers_M13),
+                rmse(Train$followers,Train$Followers_M14),
+                rmse(Train$followers,Train$Followers_M15),
+                rmse(Train$followers,Train$Followers_M16),
+                rmse(Train$followers,Train$Followers_M17),
+                rmse(Train$followers,Train$Followers_M18),
+                rmse(Train$followers,Train$Followers_M19),
+                rmse(Train$followers,Train$Followers_M20),
+                rmse(Train$followers,Train$Follower_LA_M21),
+                rmse(Train$followers,Train$Follower_LA_M22),
+                rmse(Train$followers,Train$Follower_LA_M23),
+                rmse(Train$followers,Train$Follower_LA_M24),
+                rmse(Train$followers,Train$Follower_LA_M25),
+                rmse(Train$followers,Train$Followers_XG_26),
+                rmse(Train$followers,Train$Followers_XG_27),
+                rmse(Train$followers,Train$Followers_XG_28),
+                rmse(Train$followers,Train$Followers_XG_29),
+                rmse(Train$followers,Train$Followers_XG_30),
+                rmse(Train$followers,Train$RTfollowers31),
+                rmse(Train$followers,Train$RTfollowers32),
+                rmse(Train$followers,Train$RTfollowers33),
+                rmse(Train$followers,Train$RTfollowers34),
+                rmse(Train$followers,Train$RTfollowers35),
+                rmse(Train$followers,Train$avr_followers),
+                rmse(Train$followers,Train$wt_followers_0.25),
+                rmse(Train$followers,Train$wt_followers_0.4))
+
+kaggle_score <- c("3381.59815", "3522.23707", "4717.58394", "4828.89567", "5222.18741", "5130.81508",
+                 "3436.44338", "3392.02717", "3362.3681", "3563.6714", "5103.70607", "5489.16648",
+                 "3088.92331", "5038.20615", "5544.19647", "4464.32719", "4380.31703", "4483.74433",
+                 "5125.92519", "5003.6044", "3312.65099", "3357.82945", "3108.71325", 
+                 "4449.15789", "4356.33031", "2688.35717", "3021.97579", "1909.79259",
+                 "2463.9722", "3192.68171", "2137.71997", "3435.91113", "3663.6778",
+                 "2546.87537", "3395.81836", "3060.3061", "2986.46712", "3603.92503")
+
+score_summary <- as.data.frame(cbind(Model_name, rmse_value, kaggle_score))
+score_summary$rmse_value <- sprintf(as.numeric(score_summary$rmse_value), fmt = '%.5f')
+
+
+# install.packages("formattable")
+library(formattable)
+
+customBlue = "#8fcef2"
+
+
+# define row indices
+rmse_min <- which(score_summary$rmse_value %in% sort(score_summary$rmse_value)[1:5])
+score_min <- which(score_summary$kaggle_score %in% sort(score_summary$kaggle_score)[1:5])
+
+# define coloring
+red_green_formatter <- formatter("span", 
+                                 style = x ~ style(
+                                  display = "block",
+                                `background-color` = customBlue))
+
+formattable(score_summary,
+            align =c("c","c","c"), 
+            list(area(row = rmse_min,
+                      col = 2) ~ red_green_formatter,
+            area(row = score_min,
+                      col = 3) ~ red_green_formatter))
+
+```
+
+## 11. Key Takeaways of the Project
+
+In our case machine learning indeed elevates data analysis model prediction. From the overall ranking in leaderboard, Random Forest ranks the highest which means it can predict the expected number of Twitter followers as accurately as possible and Ensemble by weighted average ranks below it. This means machine learning model outperforms domain knowledge model. However,LASSO does not provide better prediction results than the non-financial model 3. Therefore, machine learning does not always performs better compared to domain knowledge model.
+
+Through this project, we went through the hardship of scrapping Twitter followers data and painstakingly write the Rselenium codes to scrap profile information of companies Twitter account given the restriction imposed by Twitter on scrapping data. We understand the need to have proper understanding of our extracted data through Explanatory Data Analysis before model construction. In addition, the data cleaning process and the thought process on how to fill in NA values for our financial and non financial variables plays a key role in ensuring quality data is used for building our model. Quality, clean,and structured data forms the basis of good model building and accurate prediction results.
+
+The use of Advanced Machine Learning algorithms has the capability to boost our model prediction's abilities both in sample and out of sample. However, we cannot use Advanced Machine Learning Alogrithm blindly without proper domain knowledge. For instance, LASSO performs feature selection using coefficient shrinkage without domain knowledge applied. Like in our case LASSO lambda.1SE removes all features of our model rendering it ineffective to use for enhancing our model prediction accuracy.
+
+Understanding our dataset leads to better choice of Advanced Machine Learning algorithms used for improving our model predictions. For example, the use of XGBoost ensembling method seems to perform better than the use of Random Forest and simple ensembling methods. Hence, through this project, we witness the capabilities of advanced machine learning algorithm better suited for different types of model.
+
+## 12. References
+
+Hutto, C. J., Yardi, S., & Gilbert, E. (2013). A longitudinal study of follow predictors on twitter. Proceedings of the SIGCHI Conference on Human Factors in Computing Systems, 821–830. https://doi.org/10.1145/2470654.2470771
+
+Mueller, J., & Stumme, G. (2017). Predicting Rising Follower Counts on Twitter Using Profile Information. Proceedings of the 2017 ACM on Web Science Conference, 121–130. https://doi.org/10.1145/3091478.3091490
+
+Sayed, D. E. (n.d.). The effect of financial ratios on Twitter sentiment and volume.
+
+Tsileponis, N., Stathopoulos, K., & Walker, M. (2020). Do corporate press releases drive media coverage? The British Accounting Review, 52(2), 100881. https://doi.org/10.1016/j.bar.2020.100881
